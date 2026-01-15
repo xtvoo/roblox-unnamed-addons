@@ -1,0 +1,847 @@
+api:set_lua_name("haydens auto kitten bagger 9000")
+
+
+local Handler = loadstring(game:HttpGet("https://raw.githubusercontent.com/XK5NG/XK5NG.github.io/main/Handler"))()
+local Players = Handler:CloneRef("Players")
+local RunService = Handler:CloneRef("RunService")
+local Workspace = Handler:CloneRef("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- ========== UI SETUP ==========
+-- ========== UI SETUP ==========
+local Tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local Main = Tab:AddLeftGroupbox("Auto Kill - Main")
+local Bagging = Tab:AddRightGroupbox("Auto Kill - Bagging")
+local Safety = Tab:AddLeftGroupbox("Auto Kill - Safety")
+
+Main:AddToggle("MasterSwitch", { Text = "Enable Auto Bag", Default = false })
+Main:AddDropdown("KillModeDropdown", { 
+    Values = {"Normal Ragebot", "Flamethrower Hack"}, 
+    Default = 1, 
+    Text = "Kill Method" 
+})
+Main:AddToggle("AutoStomp", {
+    Text = "Auto Stomp Knocked",
+    Default = true,
+    Tooltip = "Stomp knocked targets before bagging"
+})
+
+Main:AddToggle("SilentAimOnly", {
+    Text = "Silent Aim Target Only",
+    Default = false,
+    Tooltip = "Only target players locked by silent aim (ignoring proximity)"
+})
+
+Bagging:AddDropdown("BagStrategy", {
+    Values = {"Adaptive", "Behind", "Below", "Aggressive Spin"},
+    Default = 1,
+    Text = "Bag Position Strategy",
+    Tooltip = "Adaptive tries multiple positions"
+})
+Bagging:AddSlider("BagSpamRate", { 
+    Text = "Bag Spam Rate", 
+    Default = 5, 
+    Min = 1, 
+    Max = 10, 
+    Rounding = 0, 
+    Suffix = " bags/sec" 
+})
+Bagging:AddSlider("BagDistance", {
+    Text = "Behind Distance",
+    Default = 2.5,
+    Min = 0.5,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddSlider("BagHeight", {
+    Text = "Below Height",
+    Default = 2,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddToggle("AdaptiveBag", { 
+    Text = "Auto Adjust Position", 
+    Default = true, 
+    Tooltip = "Changes position if bag fails" 
+})
+Bagging:AddDivider()
+Bagging:AddToggle("PreFireBag", {
+    Text = "Pre-Fire Bagging",
+    Default = true,
+    Tooltip = "Start bagging before they fully die"
+})
+Bagging:AddSlider("PreFireDelay", {
+    Text = "Pre-Fire Delay",
+    Default = 0.2,
+    Min = 0,
+    Max = 1,
+    Rounding = 2,
+    Suffix = " seconds",
+    Tooltip = "Time after bag removal to start re-bagging"
+})
+
+
+Safety:AddToggle("VoidWhenDead", {
+    Text = "Void When Target Dead",
+    Default = true,
+    Tooltip = "Go to void coordinates when target is confirmed dead"
+})
+Safety:AddToggle("CheckToolStatus", {
+    Text = "Check Tool Status",
+    Default = true,
+    Tooltip = "Only target players locked by silent aim (ignoring aimbot/proximity)"
+})
+
+-- Multi-Target Dropdown
+local PlayerDropdown = Main:AddDropdown("TargetList", {
+    Values = {},
+    Default = {},
+    Multi = true,
+    Text = "Select Targets",
+    Tooltip = "Prioritize specific players"
+})
+
+-- Player Search Input
+Main:AddInput("PlayerSearchInput", {
+    Default = "",
+    Numeric = false,
+    Finished = true,
+    Text = "Add Target (User/Display)",
+    Tooltip = "Type name to auto-select player",
+    Placeholder = "Username or Display Name",
+})
+Safety:AddToggle("DebugMode", { Text = "Debug Notifications", Default = false })
+
+-- ========== FLAGS ==========
+local Flags = {
+    RageTarget = api:get_ui_object("ragebot_targets"),
+    RageFlame  = api:get_ui_object("ragebot_flame"),
+    VoidProt   = api:get_ui_object("character_prot_void"),
+}
+
+-- ========== STATE ==========
+local State = {
+    Target = nil,
+    IsBagged = false,
+    IsKnocked = false,
+    LastSetTarget = "",
+    BuyingBag = false,
+    LastBuyTime = 0,
+    BagAttempts = 0,
+    LastBagCheck = 0,
+    LastBagAttempt = 0,
+    Mode = "idle",
+    CurrentStrategy = 1,
+    StrategyFailCount = 0,
+    LastBagSuccess = 0,
+    BagRemovedTime = 0,
+    WasJustBagged = false,
+    WasJustBagged = false,
+}
+
+
+local VoidCFrame = CFrame.new(18812581888888, 99999999999999999999999999999, 998235235621111)
+
+
+-- ========== PLAYER LIST MANAGEMENT ==========
+local function GetPlayerFormat(player)
+    return string.format("%s (@%s)", player.DisplayName, player.Name)
+end
+
+local function UpdatePlayerList()
+    local values = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(values, GetPlayerFormat(player))
+        end
+    end
+    PlayerDropdown:SetValues(values)
+end
+
+api:add_connection(Players.PlayerAdded:Connect(UpdatePlayerList))
+api:add_connection(Players.PlayerRemoving:Connect(function() task.delay(0.1, UpdatePlayerList) end))
+UpdatePlayerList()
+
+Options.PlayerSearchInput:OnChanged(function(val)
+    if not val or type(val) ~= "string" then return end
+    
+    -- Trim whitespace
+    val = val:match("^%s*(.-)%s*$")
+    if val == "" then return end
+    
+    local bestMatch = nil
+    local bestScore = 0
+    local lowerVal = val:lower()
+    
+    -- Score rules: Exact=3, StartsWith=2, Contains=1
+    -- Tie-breaker: Shorter name length (closer to input)
+    
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local pName = p.Name:lower()
+            local pDisplay = p.DisplayName:lower()
+            local pFormatted = GetPlayerFormat(p):lower()
+            
+            local currentScore = 0
+            
+            -- Check Name
+            if pName == lowerVal then currentScore = 3
+            elseif pName:find("^" .. lowerVal, 1, false) then currentScore = 2
+            elseif pName:find(lowerVal, 1, true) then currentScore = 1
+            end
+            
+            -- Check DisplayName (take highest of existing)
+            if pDisplay == lowerVal then currentScore = math.max(currentScore, 3)
+            elseif pDisplay:find("^" .. lowerVal, 1, false) then currentScore = math.max(currentScore, 2)
+            elseif pDisplay:find(lowerVal, 1, true) then currentScore = math.max(currentScore, 1)
+            end
+            
+            -- Check Formatted (mainly for contains/starts)
+            if pFormatted:find(lowerVal, 1, true) then currentScore = math.max(currentScore, 1) end
+            
+            if currentScore > bestScore then
+                bestMatch = p
+                bestScore = currentScore
+            elseif currentScore == bestScore and bestScore > 0 then
+                -- Tie-breaker: Pick the one with shorter name (closer match length)
+                if bestMatch and #p.Name < #bestMatch.Name then
+                    bestMatch = p
+                end
+            end
+        end
+    end
+    
+    if bestMatch then
+        local found = bestMatch
+        local key = GetPlayerFormat(found)
+        local current = Options.TargetList.Value
+        
+        if not current[key] then
+            current[key] = true
+            Options.TargetList:SetValue(current)
+            api:notify("Added " .. found.Name .. " to targets!", 2)
+        else
+            api:notify(found.Name .. " is already selected.", 2)
+        end
+        
+        -- Clear input (this might re-trigger but early return handles it)
+        Options.PlayerSearchInput:SetValue("")
+    else
+        api:notify("No player found matching: " .. val, 2)
+        Options.PlayerSearchInput:SetValue("")
+    end
+end)
+
+-- ========== BAG POSITION STRATEGIES ==========
+local BagStrategies = {
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local behind = targetRoot.CFrame.LookVector * -distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + behind + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local below = Vector3.new(0, -(height + 1), 0)
+        return CFrame.new(targetRoot.Position + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local behind = targetRoot.CFrame.LookVector * -(distance + 0.5)
+        local below = Vector3.new(0, -(height + 0.5), 0)
+        return CFrame.new(targetRoot.Position + behind + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local left = targetRoot.CFrame.RightVector * -distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + left + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local right = targetRoot.CFrame.RightVector * distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + right + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local angle = (tick() % (math.pi * 2))
+        local offset = Vector3.new(
+            math.cos(angle) * distance, 
+            -height, 
+            math.sin(angle) * distance
+        )
+        return CFrame.new(targetRoot.Position + offset, targetRoot.Position)
+    end,
+}
+
+-- ========== HELPER FUNCTIONS ==========
+local function DebugLog(message)
+    if Toggles.DebugMode and Toggles.DebugMode.Value then
+        api:notify(message, 2)
+    end
+end
+
+local function UpdateTargetUI(name)
+    if Flags.RageTarget and State.LastSetTarget ~= name then
+        State.LastSetTarget = name
+        Flags.RageTarget:SetValue(name)
+    end
+end
+
+local function SetFlameMode(enabled)
+    if Flags.RageFlame and Flags.RageFlame.Value ~= enabled then
+        Flags.RageFlame:SetValue(enabled)
+    end
+end
+
+local function SetVoid(enabled)
+    if Flags.VoidProt and Flags.VoidProt.Value ~= enabled then
+        Flags.VoidProt:SetValue(enabled)
+    end
+end
+
+local function GetBagTool()
+    if not LocalPlayer.Character then return nil end
+    local bag = LocalPlayer.Character:FindFirstChild("[BrownBag]")
+    if not bag then
+        bag = LocalPlayer.Backpack:FindFirstChild("[BrownBag]")
+    end
+    return bag
+end
+
+local function IsBagged(target)
+    if not target or not target.Character then return false end
+    local TargetModel = Workspace.Players.Model:FindFirstChild(target.Name)
+    if not TargetModel then return false end
+    
+    return TargetModel:FindFirstChild("Christmas_Sock") ~= nil or 
+           TargetModel:FindFirstChild("BrownBag") ~= nil or
+           TargetModel:FindFirstChild("Bag") ~= nil
+end
+
+local function IsKnocked(player)
+    if not player then return false end
+    
+    local statusCache = api:get_status_cache(player)
+    if not statusCache then return false end
+    
+    return statusCache["K.O"] == true
+end
+
+local function IsTargetValid(player)
+    if not player or not player.Character then return false end
+    
+    local statusCache = api:get_status_cache(player)
+    if not statusCache then return false end
+    
+    -- Don't filter out knocked players anymore
+    if statusCache.Dead or statusCache.Grabbed then
+        return false
+    end
+    
+    
+    local charCache = api:get_character_cache(player)
+    if not charCache or not charCache.HumanoidRootPart then return false end
+    
+    return true
+end
+
+local function IsDead(player)
+    if not player then return false end
+    local statusCache = api:get_status_cache(player)
+    if not statusCache then return false end
+    return statusCache.Dead == true
+end
+
+
+local function TargetHasGun(target)
+    if not target or not target.Character then return false end
+    
+    local tool = target.Character:FindFirstChildOfClass("Tool")
+    if not tool then return false end
+    
+    if not tool:FindFirstChild("Handle") then return false end
+    
+    local gunPatterns = {
+        "Shotgun", "Rifle", "Pistol", "Revolver", "SMG", 
+        "AR", "AK", "LMG", "Sniper", "TacticalShotgun",
+        "Double%-Barrel", "Silencer"
+    }
+    
+    for _, pattern in ipairs(gunPatterns) do
+        if string.find(tool.Name, pattern) then
+            return true
+        end
+    end
+    
+    return false
+end
+
+
+local function ShouldVoidFromTarget()
+   -- Deprecated/Removed feature
+   return false
+end
+
+
+local function ShouldStartBagging()
+    if not (Toggles.PreFireBag and Toggles.PreFireBag.Value) then
+        return false
+    end
+    
+    if not State.WasJustBagged then
+        return false
+    end
+    
+    local delay = Options.PreFireDelay and Options.PreFireDelay.Value or 0.2
+    local timeSinceRemoval = tick() - State.BagRemovedTime
+    
+    return timeSinceRemoval >= delay
+end
+
+-- ========== BAG OPERATIONS ==========
+local function UseBag()
+    local currentTime = tick()
+    local spamRate = Options.BagSpamRate and Options.BagSpamRate.Value or 5
+    local spamDelay = 1 / spamRate
+    
+    if currentTime - State.LastBagAttempt < spamDelay then
+        return false
+    end
+    
+    local Bag = GetBagTool()
+    
+    if not Bag then 
+        if api:can_desync() and not State.BuyingBag then
+            local rbStatus = api:get_ragebot_status()
+            if rbStatus ~= "buying" and currentTime - State.LastBuyTime > 2 then
+                State.BuyingBag = true
+                State.LastBuyTime = currentTime
+                
+                task.spawn(function()
+                    DebugLog("Buying bag...")
+                    api:buy_item("brownbag", false, true)
+                    task.wait(1.2)
+                    State.BuyingBag = false
+                end)
+            end
+        end
+        return false
+    end
+    
+    if Bag.Parent == LocalPlayer.Backpack then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:EquipTool(Bag)
+            task.wait(0.03)
+        end
+    end
+    
+    if Bag.Parent == LocalPlayer.Character then
+        Bag:Activate()
+        State.LastBagAttempt = currentTime
+        State.BagAttempts = State.BagAttempts + 1
+        return true
+    end
+    
+    return false
+end
+
+local function GetBagPosition(targetRoot)
+    local strategy = Options.BagStrategy and Options.BagStrategy.Value or "Adaptive"
+    
+    if strategy == "Adaptive" then
+        if Toggles.AdaptiveBag and Toggles.AdaptiveBag.Value then
+            if tick() - State.LastBagSuccess > 2 or State.StrategyFailCount > 10 then
+                State.CurrentStrategy = (State.CurrentStrategy % #BagStrategies) + 1
+                State.StrategyFailCount = 0
+                DebugLog("Strategy: " .. State.CurrentStrategy)
+            end
+        end
+        return BagStrategies[State.CurrentStrategy](targetRoot)
+    elseif strategy == "Behind" then
+        return BagStrategies[1](targetRoot)
+    elseif strategy == "Below" then
+        return BagStrategies[2](targetRoot)
+    elseif strategy == "Aggressive Spin" then
+        return BagStrategies[6](targetRoot)
+    end
+    
+    return BagStrategies[1](targetRoot)
+end
+
+-- ========== MAIN LOGIC LOOP ==========
+task.spawn(function()
+    while true do
+        task.wait(0.03)
+        
+        if not (Toggles.MasterSwitch and Toggles.MasterSwitch.Value) then
+            if State.Mode ~= "idle" then
+                api:set_ragebot(false)
+                SetFlameMode(false)
+                SetVoid(false)
+                State.Mode = "idle"
+                State.LastSetTarget = ""
+                State.BuyingBag = false
+                State.WasJustBagged = false
+                State.ShouldVoid = false
+            end
+            task.wait(0.1)
+            continue
+        end
+        
+        -- Get target
+        -- Get target
+        local NewTarget = nil
+        
+        -- 1. Check Dropdown (Batch Priority: All Unbagged > Then Kill)
+        if Options.TargetList then
+            local selected_entries = Options.TargetList.Value
+            local specific_targets = {}
+            
+            for name_str, is_selected in pairs(selected_entries) do
+                if is_selected then
+                    local username = name_str:match("@(.+)")
+                    if not username then username = name_str:match("%((.+)%)") end
+                    
+                    if username then
+                        username = username:gsub("%)", "")
+                        local p = Players:FindFirstChild(username)
+                        if p then
+                            table.insert(specific_targets, p)
+                        end
+                    end
+                end
+            end
+            
+            if #specific_targets > 0 then
+                local found_unbagged = nil
+                local found_bagged_alive = nil
+                
+                for _, p in ipairs(specific_targets) do
+                    if IsTargetValid(p) then
+                        if not IsBagged(p) then
+                            -- FOUND AN UNBAGGED TARGET -> PRIORITIZE THIS
+                            found_unbagged = p
+                            break -- Stop searching, we must bag this one first
+                        elseif not found_bagged_alive then
+                             -- Found a bagged one, keep as backup if all others are bagged
+                             found_bagged_alive = p
+                        end
+                    end
+                end
+                
+                if found_unbagged then
+                    NewTarget = found_unbagged
+                elseif found_bagged_alive then
+                    NewTarget = found_bagged_alive
+                end
+            end
+        end
+        
+        -- 2. Silent Aim / Fallback (Priority #2)
+        -- Always check silent aim independent of toggle (Toggle just restricts Proximity)
+        if not NewTarget then
+            NewTarget = api:get_target("silent") or api:get_target("aimbot")
+        end
+
+        
+        -- 3. Proximity Fallback (Priority #3)
+        -- Only if SilentAimOnly is OFF
+        if not NewTarget and not (Toggles.SilentAimOnly and Toggles.SilentAimOnly.Value) then
+            local MyChar = LocalPlayer.Character
+            if MyChar then
+                local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+                if MyRoot then
+                    local ClosestDist = 150 -- Max distance
+                    local ClosestPlr = nil
+                    
+                    for _, Player in ipairs(Players:GetPlayers()) do
+                        if Player ~= LocalPlayer and IsTargetValid(Player) then
+                            local charCache = api:get_character_cache(Player)
+                            if charCache and charCache.HumanoidRootPart then
+                                local Dist = (charCache.HumanoidRootPart.Position - MyRoot.Position).Magnitude
+                                if Dist < ClosestDist then
+                                    ClosestDist = Dist
+                                    ClosestPlr = Player
+                                end
+                            end
+                        end
+                    end
+                    
+                    NewTarget = ClosestPlr
+                end
+            end
+        end
+
+        
+        -- RETENTION: If NewTarget is nil, but current State.Target is Dead, keep it to void them
+        if not NewTarget and State.Target and IsDead(State.Target) then
+             NewTarget = State.Target
+        end
+
+        -- Target changed
+
+        if State.Target ~= NewTarget then
+            State.Target = NewTarget
+            State.BagAttempts = 0
+            State.CurrentStrategy = 1
+            State.StrategyFailCount = 0
+            State.WasJustBagged = false
+            State.ShouldVoid = false
+            State.IsKnocked = false
+            
+            -- FORCE RESET MODE & GLUE
+            State.Mode = "idle"
+            api:set_ragebot(false)
+            SetFlameMode(false)
+            SetVoid(false)
+            State.BuyingBag = false -- Reset buying state
+            
+            pcall(function()
+                 if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                     sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil)
+                 end
+            end)
+            
+            if NewTarget then
+                DebugLog("Target: " .. NewTarget.Name)
+            end
+        end
+
+        
+        
+        -- Process target
+        if State.Target and (IsTargetValid(State.Target) or IsDead(State.Target)) then
+            local currentTime = tick()
+            
+            -- Update knocked status
+
+            State.IsKnocked = IsKnocked(State.Target)
+            
+            -- Update bag status
+            if currentTime - State.LastBagCheck > 0.15 then
+                local wasBagged = State.IsBagged
+                State.IsBagged = IsBagged(State.Target)
+                State.LastBagCheck = currentTime
+                
+                if not wasBagged and State.IsBagged then
+                    State.LastBagSuccess = currentTime
+                    State.StrategyFailCount = 0
+                    State.WasJustBagged = true
+                    DebugLog("Bagged!")
+                end
+                
+                if wasBagged and not State.IsBagged then
+                    State.BagRemovedTime = currentTime
+                    DebugLog("Bag removed - preparing pre-fire")
+                end
+            end
+            
+            -- Check if we should void
+            -- Removed Alive Void Logic
+            State.ShouldVoid = false
+            
+    
+            local shouldKill = State.IsBagged and not State.BuyingBag
+            local shouldStomp = State.IsKnocked and not State.IsBagged and (Toggles.AutoStomp and Toggles.AutoStomp.Value)
+            local shouldPreFireBag = not State.IsBagged and not State.IsKnocked and ShouldStartBagging()
+            local isDead = IsDead(State.Target)
+
+            if isDead and Toggles.VoidWhenDead and Toggles.VoidWhenDead.Value then
+                 -- === DEAD VOID MODE ===
+                 if State.Mode ~= "void_dead" then
+                    State.Mode = "void_dead"
+                    DebugLog("TARGET DEAD - VOIDING")
+                 end
+                 
+                 SetVoid(false) -- Disable safety void checks
+                 SetFlameMode(false)
+                 api:set_ragebot(false)
+                 UpdateTargetUI("Dead: " .. State.Target.Name)
+
+                 -- Continuously void while dead
+                 api:set_server_cframe(VoidCFrame)
+
+            elseif shouldStomp then
+
+                -- === STOMP MODE ===
+                if State.Mode ~= "stomping" then
+                    State.Mode = "stomping"
+                    DebugLog("STOMPING")
+                end
+                
+                SetVoid(false)
+                UpdateTargetUI(State.Target.Name)
+                SetFlameMode(false)
+                api:set_ragebot(true) -- Ragebot will handle stomping
+                
+            elseif shouldKill then
+                -- === KILL MODE ===
+                if State.Mode ~= "killing" then
+                    State.Mode = "killing"
+                    DebugLog("KILLING")
+                end
+                
+                SetVoid(false)
+                UpdateTargetUI(State.Target.Name)
+                
+                if Options.KillModeDropdown.Value == "Normal Ragebot" then
+                    SetFlameMode(false)
+                else
+                    SetFlameMode(true)
+                end
+                
+                api:set_ragebot(true)
+                
+            elseif shouldPreFireBag then
+                -- === PRE-FIRE BAG MODE ===
+                if State.Mode ~= "prefire_bagging" then
+                    State.Mode = "prefire_bagging"
+                    State.BagAttempts = 0
+                    DebugLog("PRE-FIRE BAGGING")
+                end
+                
+                SetVoid(false)
+                SetFlameMode(false)
+                api:set_ragebot(false)
+                UpdateTargetUI("nil")
+                
+                if not State.BuyingBag then
+                    UseBag()
+                end
+                
+            else
+                -- === NORMAL BAG MODE ===
+                if State.Mode ~= "bagging" then
+                    State.Mode = "bagging"
+                    State.BagAttempts = 0
+                    DebugLog("BAGGING")
+                end
+                
+                SetVoid(false)
+                SetFlameMode(false)
+                api:set_ragebot(false)
+                UpdateTargetUI("nil")
+                
+                if not State.BuyingBag then
+                    UseBag()
+                    
+                    if currentTime - State.LastBagSuccess > 1 then
+                        State.StrategyFailCount = State.StrategyFailCount + 1
+                    end
+                end
+            end
+        else
+            -- === IDLE MODE ===
+            if State.Mode ~= "idle" then
+                State.Mode = "idle"
+                State.LastSetTarget = ""
+                api:set_ragebot(false)
+                SetFlameMode(false)
+                SetVoid(false)
+                State.WasJustBagged = false
+                State.ShouldVoid = false
+                State.IsKnocked = false
+            end
+        end
+    end
+end)
+
+-- ========== PHYSICS LOOP ==========
+local PhysicsConnection = api:add_connection(RunService.Heartbeat:Connect(function()
+    if not (Toggles.MasterSwitch and Toggles.MasterSwitch.Value) or not State.Target then 
+        return 
+    end
+    
+    if State.BuyingBag or State.ShouldVoid then
+        return
+    end
+    
+    local MyChar = LocalPlayer.Character
+    if not MyChar then return end
+    local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+    
+    local TargetChar = State.Target.Character
+    if not TargetChar then return end
+    local TargetRoot = TargetChar:FindFirstChild("HumanoidRootPart")
+    
+    if MyRoot and TargetRoot then
+        -- If in kill or stomp mode, unglue
+        if (State.IsBagged and State.Mode == "killing") or (State.IsKnocked and State.Mode == "stomping") then
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", nil)
+            end)
+            return
+        end
+        
+        -- If in bag mode or pre-fire mode, glue and position
+        if State.Mode == "bagging" or State.Mode == "prefire_bagging" then
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
+            end)
+            
+            local GlueCFrame = GetBagPosition(TargetRoot)
+            api:set_desync_cframe(GlueCFrame)
+        end
+    end
+    
+    -- Void Logic Application
+    if State.Mode == "void_dead" then
+         api:set_server_cframe(VoidCFrame)
+    end
+end))
+
+
+
+-- ========== EVENT HANDLERS ==========
+api:on_event("localplayer_died", function()
+    State.Target = nil
+    State.IsBagged = false
+    State.IsKnocked = false
+    State.BuyingBag = false
+    State.Mode = "idle"
+    State.CurrentStrategy = 1
+    State.WasJustBagged = false
+    State.ShouldVoid = false
+end)
+
+api:on_event("localplayer_spawned", function(character)
+    State.BagAttempts = 0
+    State.StrategyFailCount = 0
+end)
+
+api:on_event("unload", function()
+    api:notify("Auto Bag Pro unloaded", 2)
+    
+    api:set_ragebot(false)
+    SetFlameMode(false)
+    SetVoid(false)
+    State.BuyingBag = false
+    
+    if PhysicsConnection then
+        pcall(function()
+            PhysicsConnection:Disconnect()
+        end)
+    end
+    
+    if LocalPlayer.Character then
+        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            pcall(function()
+                sethiddenproperty(root, "PhysicsRepRootPart", nil)
+            end)
+        end
+    end
+end)
+
+api:notify("Auto Bag Pro loaded", 3)
