@@ -7,15 +7,102 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local function safe_call(func, name)
     local success, err = pcall(func)
     if not success then
-        print(string.format("[VEXIS ERROR] in %s: %s", name or "Unknown", tostring(err)))
+        print(string.format("[KITTEN SAVER ERROR] in %s: %s", name or "Unknown", tostring(err)))
     end
     return success, err
 end
 
+-- Declare SyncWhitelist at file scope so the loop can see it
+local SyncWhitelist = nil
+
 local MainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
-if not MainEvent then print("[VEXIS ERROR] MainEvent not found in ReplicatedStorage!") end
+if not MainEvent then print("[KITTEN SAVER ERROR] MainEvent not found in ReplicatedStorage!") end
 
 safe_call(function() api:set_lua_name("Hayden's Kitten Saver 900") end, "api:set_lua_name")
+
+-- Define SyncWhitelist implementation
+SyncWhitelist = function()
+    safe_call(function()
+        -- 1. Get Whitelist Dropdown Values (Formatted Names)
+        local raw_names_to_whitelist = {}
+        
+        local protector_wl = api:get_ui_object("protector_whitelist")
+        if protector_wl and protector_wl.Value then 
+            for formatted_name, enabled in pairs(protector_wl.Value) do 
+                if enabled then
+                    -- Extract Username from "Display (@Name)"
+                    local username = formatted_name:match("@([^%)]+)")
+                    if username then
+                        raw_names_to_whitelist[username] = true
+                    elseif not formatted_name:find("@") then
+                         -- Fallback if just raw name
+                         raw_names_to_whitelist[formatted_name] = true
+                    end
+                end
+            end
+        end
+        
+        -- 2. Get Current Owner Name (Always Raw Username)
+        local owner_input = api:get_ui_object("protector_owner_input")
+        if owner_input and owner_input.Value and owner_input.Value ~= "" then
+            raw_names_to_whitelist[owner_input.Value] = true 
+        end
+        
+            -- User suggested GetValue/SetOption
+            if GetValue and SetOption then
+                local current_wl = GetValue("ragebot_whitelist")
+                local r_vals = current_wl or {}
+                if type(r_vals) ~= "table" then r_vals = {} end
+                
+                local changed = false
+                for name, _ in pairs(raw_names_to_whitelist) do
+                    local found = false
+                    for _, v in pairs(r_vals) do
+                        if v == name then found = true break end
+                    end
+                    if not found then
+                        table.insert(r_vals, name)
+                        changed = true
+                        print("[KS DEBUG] Added " .. name .. " via SetOption")
+                    end
+                end
+                
+                if changed then
+                        SetOption("ragebot_whitelist", r_vals)
+                        print("[KS DEBUG] Updated ragebot_whitelist via SetOption")
+                end
+                -- Do NOT return here, fall through to UI object update for visual sync
+            end
+            
+            -- Fallback / Visual Sync (Update the UI object directly if found)
+             local ragebot_ui = api:get_ui_object("ragebot_whitelist") or api:get_ui_object("whitelist") or api:get_ui_object("Whitelist")
+             if ragebot_ui then
+                 -- Handle UI Object Sync (Array style)
+                 local r_selection = ragebot_ui.Value or {}
+                 if type(r_selection) ~= "table" then r_selection = {} end
+                 
+                 local r_options = ragebot_ui.Values or (ragebot_ui.options) or {}
+                 if type(r_options) ~= "table" then r_options = {} end
+
+                 local changed_sel, changed_opt = false, false
+                 
+                 for name, _ in pairs(raw_names_to_whitelist) do
+                     -- Ensure in Options
+                     local in_opt = false
+                     for _, v in pairs(r_options) do if v == name then in_opt = true break end end
+                     if not in_opt then table.insert(r_options, name) changed_opt = true end
+                     
+                     -- Ensure in Selection
+                     local in_sel = false
+                     for _, v in pairs(r_selection) do if v == name then in_sel = true break end end
+                     if not in_sel then table.insert(r_selection, name) changed_sel = true end
+                 end
+                 
+                 if changed_opt and ragebot_ui.SetValues then ragebot_ui:SetValues(r_options) end
+                 if changed_sel then ragebot_ui:SetValue(r_selection) print("[KS DEBUG] Updated Ragebot UI Object") end
+             end
+    end, "SyncWhitelist")
+end
 
 local ragebot_tab, protector_group, utility_group
 safe_call(function()
@@ -28,7 +115,7 @@ safe_call(function()
     protector_group:AddToggle("protector_active", { Text = "Enable Protector", Default = false })
     
     local function saveConfig(owner_name)
-        if hasattr and hasattr(writefile, "function") then return end -- Safety check if needed, or just standard pcall
+        if hasattr and hasattr(writefile, "function") then return end 
         if writefile then
              pcall(function() writefile("kitten_saver_config.txt", owner_name or "") end)
         end
@@ -51,23 +138,33 @@ safe_call(function()
         Tooltip = "Enter username to protect. Saves automatically.",
         Callback = function(val)
             saveConfig(val)
+            SyncWhitelist() -- Now this will work!
             -- Auto-update target list if valid
             if val and val ~= "" then
                 local targets_obj = api:get_ui_object("protector_targets")
                 if targets_obj then
                     local p = Players:FindFirstChild(val)
                     if p then
-                       -- Logic to select this player in the dropdown could go here
-                       -- For now, we rely on the manual selection or custom logic
+                       -- Logic to select in dropdown if needed
                     end
                 end
             end
         end
     })
 
+    protector_group:AddToggle("protector_reload_on_ko", { Text = "Force Reload on Knock", Default = false })
     protector_group:AddToggle("protector_stomp", { Text = "Stomp Target (Doesnt Work w FP)", Default = false })
     protector_group:AddSlider("protector_stomp_height", { Text = "Stomp Height", Default = 3, Min = -5, Max = 10, Rounding = 1, Compact = false })
     protector_group:AddDropdown("protector_targets", { Text = "Select Players to Protect", Values = {}, Multi = true, Default = {} })
+
+    protector_group:AddDropdown("protector_whitelist", { 
+        Text = "Whitelist (Ignore)", 
+        Values = {}, 
+        Multi = true, 
+        Default = {},
+        Callback = function() SyncWhitelist() end
+    })
+    
     protector_group:AddToggle("protector_follow_owner", { Text = "Follow Owner", Default = false })
     protector_group:AddSlider("protector_follow_off_x", { Text = "Follow Offset X", Default = 0, Min = -50, Max = 50, Rounding = 1, Compact = false })
     protector_group:AddSlider("protector_follow_off_y", { Text = "Follow Offset Y", Default = 0, Min = -50, Max = 50, Rounding = 1, Compact = false })
@@ -93,6 +190,24 @@ safe_call(function()
     end)
 end, "UI Setup Objects")
 
+local function forceReload()
+    safe_call(function()
+        local char = LocalPlayer.Character
+        if char then
+            local tool = char:FindFirstChildWhichIsA("Tool")
+            if tool and MainEvent then
+                MainEvent:FireServer("Reload", tool)
+                -- Also try keypress as backup
+                if VirtualInputManager then
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+                    task.wait(0.05)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+                end
+            end
+        end
+    end, "forceReload")
+end
+
 local function getFormattedName(player)
     return string.format("%s (@%s)", player.DisplayName, player.Name)
 end
@@ -108,6 +223,10 @@ local function updatePlayerList()
         end
         
         local dropdown_p = api:get_ui_object("protector_targets")
+        local dropdown_w = api:get_ui_object("protector_whitelist")
+        
+        if dropdown_w then dropdown_w:SetValues(dropdown_items) end
+
         if dropdown_p then 
             dropdown_p:SetValues(dropdown_items)
             
@@ -321,16 +440,51 @@ task.spawn(function()
             for attacker_name, _ in pairs(active_threats) do
                 local p = Players:FindFirstChild(attacker_name)
                 local neutralized, reason = false, ""
-                if not p or not p.Parent then neutralized, reason = true, "Target Left"
+                
+                -- Check whitelist first
+                local whitelist_obj = api:get_ui_object("protector_whitelist")
+                if whitelist_obj and whitelist_obj.Value then
+                    for fmt_name, enabled in pairs(whitelist_obj.Value) do
+                        if enabled then
+                            local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                            if extracted == attacker_name then
+                                neutralized, reason = true, "Whitelisted"
+                                break
+                            end
+                        end
+                    end
+                end
+                
+                -- Check Owner Input manually too (redundancy)
+                local owner_input = api:get_ui_object("protector_owner_input")
+                if owner_input and owner_input.Value == attacker_name then
+                     neutralized, reason = true, "Owner"
+                end
+
+                if neutralized then
+                    -- If we determined they are safe, skip the rest
+                elseif not p or not p.Parent then neutralized, reason = true, "Target Left"
                 else
                     local status = api:get_status_cache(p)
+                    local is_dead = (p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health <= 0)
+                    
                     if status and status.SDeath then neutralized, reason = true, "Target Stomped"
-                    elseif status and (status["K.O"] or status.Dead) then
+                    elseif (status and (status["K.O"] or status.Dead)) or is_dead then
                         if stomp_obj and stomp_obj.Value then needs_stomp = p
-                        else neutralized, reason = true, "Target K.O" end
+                        else neutralized, reason = true, "Target K.O/Dead" end
                     elseif not (p.Character and p.Character:FindFirstChild("Humanoid")) then neutralized, reason = true, "Target Invalid" end
                 end
-                if neutralized then active_threats[attacker_name] = nil changed = true final_reason = reason end
+                if neutralized then 
+                    active_threats[attacker_name] = nil 
+                    changed = true 
+                    final_reason = reason 
+                    
+                    -- Check Force Reload
+                    local reload_toggle = api:get_ui_object("protector_reload_on_ko")
+                    if reload_toggle and reload_toggle.Value and (reason:find("Stomped") or reason:find("K.O") or reason:find("Dead")) then
+                         forceReload()
+                    end
+                end
             end
             if needs_stomp and not stomp_connection then
                 saveState()
@@ -410,6 +564,26 @@ api:on_event("player_got_shot", function(shot_player_name, attacker_name, part, 
         local victim = Players:FindFirstChild(shot_player_name)
         if not victim then return end
         if (targets_obj.Value or {})[getFormattedName(victim)] then
+            local whitelist_obj = api:get_ui_object("protector_whitelist")
+            local is_whitelisted = false
+            
+            if whitelist_obj and whitelist_obj.Value then
+                for fmt_name, enabled in pairs(whitelist_obj.Value) do
+                    if enabled then
+                        local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                        if extracted == attacker_name then
+                            is_whitelisted = true
+                            break
+                        end
+                    end
+                end
+            end
+            
+            local owner_input = api:get_ui_object("protector_owner_input")
+            if owner_input and owner_input.Value == attacker_name then is_whitelisted = true end
+            
+            if is_whitelisted then return end
+
             local attacker_p = Players:FindFirstChild(attacker_name)
             if attacker_p and attacker_p.Character then
                 if not active_threats[attacker_name] then
@@ -452,15 +626,36 @@ task.spawn(function()
                                         local creator = hum:FindFirstChild("creator") or hum:FindFirstChild("Creator")
                                         if creator and creator.Value and creator.Value:IsA("Player") and creator.Value ~= LocalPlayer then
                                             local attacker_name = creator.Value.Name
-                                            if not active_threats[attacker_name] then
+                                            local whitelist_obj = api:get_ui_object("protector_whitelist")
+                                            
+                                            local is_whitelisted = false
+                                            if whitelist_obj and whitelist_obj.Value then
+                                                for fmt_name, enabled in pairs(whitelist_obj.Value) do
+                                                    if enabled then
+                                                        local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                                                        if extracted == attacker_name then
+                                                            is_whitelisted = true
+                                                            break
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                            
+                                            local owner_input = api:get_ui_object("protector_owner_input")
+                                            if owner_input and owner_input.Value == attacker_name then is_whitelisted = true end
+
+                                            if not active_threats[attacker_name] and not is_whitelisted then
                                                  active_threats[attacker_name] = true
                                                  api:notify(string.format("[KITTEN SAVER] %s damaged by %s!", p.DisplayName, attacker_name), 5)
                                                  refreshRagebot()
                                             end
+                                            -- Whitelist Sync Logic
+                                            if SyncWhitelist then SyncWhitelist() end
                                         end
                                     end
-                                end, "Damage Monitor")
+                                end, "Damage Monitor PCall")
                             end)
+                        
                         end
                     end
                 end
