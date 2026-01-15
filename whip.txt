@@ -1,0 +1,523 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+
+if not api or type(api.ragebot_strafe_override) ~= "function" then
+    return
+end
+
+api:set_lua_name("testaddon")
+
+api:on_event("unload", function()
+    api:notify("unloaded", 2)
+end)
+
+------------------------------------------------------------
+-- PATTERNS
+------------------------------------------------------------
+
+local PATTERNS = {
+    "Orbit",
+    "Lemniscate",
+    "Rose",
+    "Epicycloid",
+    "Cardioid",
+    "Butterfly",
+    "Spiral",
+    "Star",
+    "Clover",
+    "Cyclone",
+    "Helix3D",
+    "Sphere3D",
+    "Tornado3D",
+    "Wave3D",
+    "DNA3D",
+}
+
+------------------------------------------------------------
+-- UI SETUP
+------------------------------------------------------------
+
+local tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local tabbox = tab:AddLeftTabbox()
+local modesTab = tabbox:AddTab("Custom Strafe")
+local settingsTab = tabbox:AddTab("Settings")
+
+local u_enable = modesTab:AddToggle("cs_enable", {
+    Text = "Enable Custom Strafe",
+    Default = true,
+    Tooltip = "Master switch for custom ragebot strafe patterns."
+})
+
+local u_pattern = modesTab:AddDropdown("cs_pattern", {
+    Text = "Pattern",
+    Values = PATTERNS,
+    Default = "Orbit",
+    Multi = false,
+    Tooltip = "Select which strafe pattern to use."
+})
+
+local u_rmin = modesTab:AddSlider("cs_rmin", {
+    Text = "Radius Min",
+    Min = 2,
+    Max = 60,
+    Default = 12,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Minimum strafe radius in studs."
+})
+
+local u_rmax = modesTab:AddSlider("cs_rmax", {
+    Text = "Radius Max",
+    Min = 4,
+    Max = 120,
+    Default = 24,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Maximum strafe radius in studs."
+})
+
+local u_speed = modesTab:AddSlider("cs_speed", {
+    Text = "Speed",
+    Min = 0.5,
+    Max = 20,
+    Default = 4,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Angular speed in radians per second."
+})
+
+local u_height = modesTab:AddSlider("cs_height", {
+    Text = "Height Offset",
+    Min = 0,
+    Max = 100,
+    Default = 15,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Base height above target position."
+})
+
+settingsTab:AddDivider()
+local auto_ground = settingsTab:AddToggle("cs_auto_ground", {
+    Text = "Auto Ground Spiral",
+    Default = true,
+    Tooltip = "Auto-detect grounded targets and use tight spiral."
+})
+
+local ground_radius = settingsTab:AddSlider("cs_ground_radius", {
+    Text = "Ground Radius",
+    Min = 1,
+    Max = 8,
+    Default = 2,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Spiral radius when target is on ground."
+})
+
+local ground_height = settingsTab:AddSlider("cs_ground_height", {
+    Text = "Ground Height",
+    Min = 0,
+    Max = 15,
+    Default = 3,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Height above ground during spiral."
+})
+
+local ground_speed = settingsTab:AddSlider("cs_ground_speed", {
+    Text = "Ground Speed",
+    Min = 1,
+    Max = 10,
+    Default = 3,
+    Rounding = 1,
+    Compact = true,
+    Tooltip = "Spiral speed multiplier for ground mode."
+})
+
+------------------------------------------------------------
+-- HELPER FUNCTIONS
+------------------------------------------------------------
+
+local function V(opt, default)
+    if not opt then return default end
+    local ok, v = pcall(function() return opt.Value end)
+    return ok and v or default
+end
+
+local state = {
+    t = os.clock(),
+    ang = 0,
+    ro = 0,
+}
+
+local function face(origin, pos)
+    local f = origin - pos
+    local m = f.Magnitude
+    if m < 1e-3 then
+        return CFrame.new(pos)
+    end
+    f = f / m
+    local up = Vector3.yAxis
+    local right = f:Cross(up)
+    if right.Magnitude < 1e-3 then
+        right = Vector3.xAxis
+    else
+        right = right.Unit
+    end
+    up = right:Cross(f).Unit
+    return CFrame.fromMatrix(pos, right, up)
+end
+
+-- Ground detection raycast
+local function groundYAt(pos, ignore)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignoreList = {}
+    
+    local character = LocalPlayer and LocalPlayer.Character or nil
+    if character then
+        table.insert(ignoreList, character)
+    end
+    
+    if ignore then
+        if typeof(ignore) == "Instance" then
+            table.insert(ignoreList, ignore)
+        elseif type(ignore) == "table" then
+            for _, inst in ipairs(ignore) do
+                if typeof(inst) == "Instance" then
+                    table.insert(ignoreList, inst)
+                end
+            end
+        end
+    end
+    
+    params.FilterDescendantsInstances = ignoreList
+    local result = Workspace:Raycast(pos + Vector3.new(0, 150, 0), Vector3.new(0, -1000, 0), params)
+    return result and result.Position.Y or nil
+end
+
+------------------------------------------------------------
+-- PATTERN FUNCTIONS (15 TOTAL - 10 2D + 5 3D)
+------------------------------------------------------------
+
+-- 1) Orbit - Classic circular orbit around target
+local function pat_Orbit(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local x = r * math.cos(ang)
+    local z = r * math.sin(ang)
+    local new_pos = shoot_pos + Vector3.new(x, height, z)
+    return new_pos, shoot_pos
+end
+
+-- 2) Lemniscate - Figure-8 infinity pattern
+local function pat_Lemniscate(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local a = r * 0.8
+    local denominator = 1 + math.sin(ang) ^ 2
+    local x = (a * math.cos(ang)) / denominator
+    local z = (a * math.sin(ang) * math.cos(ang)) / denominator
+    local breathe = 5 * math.sin(ang * 2)
+    local new_pos = shoot_pos + Vector3.new(x, height + breathe, z)
+    return new_pos, shoot_pos
+end
+
+-- 3) Rose - Multi-petal flower pattern (5 petals)
+local function pat_Rose(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local k = 5
+    local rho = r * math.abs(math.cos(k * ang))
+    local x = rho * math.cos(ang)
+    local z = rho * math.sin(ang)
+    local wave = 8 * math.sin(ang * 3)
+    local new_pos = shoot_pos + Vector3.new(x, height + wave, z)
+    return new_pos, shoot_pos
+end
+
+-- 4) Epicycloid - Rolling circle pattern
+local function pat_Epicycloid(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local R = r * 0.6
+    local rr = R / 3
+    local t = ang
+    local x = (R + rr) * math.cos(t) - rr * math.cos((R + rr) / rr * t)
+    local z = (R + rr) * math.sin(t) - rr * math.sin((R + rr) / rr * t)
+    local pulse = 6 * math.abs(math.sin(t * 2))
+    local new_pos = shoot_pos + Vector3.new(x, height + pulse, z)
+    return new_pos, shoot_pos
+end
+
+-- 5) Cardioid - Heart-shaped curve
+local function pat_Cardioid(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local a = r * 0.5
+    local rho = 2 * a * (1 - math.cos(ang))
+    local x = rho * math.cos(ang)
+    local z = rho * math.sin(ang)
+    local wobble = 4 * math.sin(ang * 4)
+    local new_pos = shoot_pos + Vector3.new(x, height + wobble, z)
+    return new_pos, shoot_pos
+end
+
+-- 6) Butterfly - Exotic butterfly curve
+local function pat_Butterfly(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local scale = r * 0.25
+    local rho = math.exp(math.sin(ang)) - 2 * math.cos(4 * ang) + (math.sin((2 * ang - math.pi) / 24)) ^ 5
+    local x = scale * rho * math.sin(ang)
+    local z = scale * rho * math.cos(ang)
+    local flutter = 10 * math.abs(math.sin(ang * 5))
+    local new_pos = shoot_pos + Vector3.new(x, height + flutter, z)
+    return new_pos, shoot_pos
+end
+
+-- 7) Spiral - Expanding/contracting logarithmic spiral
+local function pat_Spiral(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local turns = 4
+    local progress = (ang / (2 * math.pi * turns)) % 1
+    local spiral_r = r * (0.2 + 0.8 * progress)
+    local x = spiral_r * math.cos(ang * turns)
+    local z = spiral_r * math.sin(ang * turns)
+    local rise = height * progress
+    local new_pos = shoot_pos + Vector3.new(x, rise + 5, z)
+    return new_pos, shoot_pos
+end
+
+-- 8) Star - Five-pointed star with vertex hopping
+local function pat_Star(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local points = 5
+    local angle = ang % (2 * math.pi)
+    local segment = (2 * math.pi) / points
+    local current_point = math.floor(angle / segment)
+    local next_point = (current_point + 2) % points
+    
+    local a1 = current_point * segment
+    local a2 = next_point * segment
+    
+    local progress = (angle % segment) / segment
+    local blend_angle = a1 + (a2 - a1) * progress
+    
+    local x = r * math.cos(blend_angle)
+    local z = r * math.sin(blend_angle)
+    local hop = 12 * math.sin(progress * math.pi)
+    local new_pos = shoot_pos + Vector3.new(x, height + hop, z)
+    return new_pos, shoot_pos
+end
+
+-- 9) Clover - Three-leaf clover pattern
+local function pat_Clover(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local k = 3
+    local rho = r * math.abs(math.sin(k * ang))
+    local x = rho * math.cos(ang)
+    local z = rho * math.sin(ang)
+    local sway = 6 * math.sin(ang * 6)
+    local new_pos = shoot_pos + Vector3.new(x, height + sway, z)
+    return new_pos, shoot_pos
+end
+
+-- 10) Cyclone - Spiraling vortex with radial wobble
+local function pat_Cyclone(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local swirl = ang * 1.5
+    local wobble_freq = 7
+    local radial = r * (0.5 + 0.5 * math.abs(math.sin(ang * 1.8)))
+    local wobble = r * 0.2 * math.sin(wobble_freq * ang)
+    local x = (radial + wobble) * math.cos(swirl)
+    local z = (radial - wobble) * math.sin(swirl)
+    local vortex = 15 * math.sin(ang * 2.5)
+    local new_pos = shoot_pos + Vector3.new(x, height + vortex, z)
+    return new_pos, shoot_pos
+end
+
+------------------------------------------------------------
+-- 3D PATTERNS (Full 3D movement)
+------------------------------------------------------------
+
+-- 11) Helix3D - Corkscrew spiral around target in 3D
+local function pat_Helix3D(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local x = r * math.cos(ang)
+    local z = r * math.sin(ang)
+    local y = height + (30 * math.sin(ang * 0.5))  -- Vertical oscillation
+    local new_pos = shoot_pos + Vector3.new(x, y, z)
+    return new_pos, shoot_pos
+end
+
+-- 12) Sphere3D - Spherical surface movement around target
+local function pat_Sphere3D(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local theta = ang  -- Azimuthal angle
+    local phi = math.sin(ang * 0.7) * math.pi * 0.6  -- Polar angle oscillates
+    
+    local sphere_r = r * 1.2
+    local x = sphere_r * math.sin(phi) * math.cos(theta)
+    local y = height + sphere_r * math.cos(phi)
+    local z = sphere_r * math.sin(phi) * math.sin(theta)
+    
+    local new_pos = shoot_pos + Vector3.new(x, y, z)
+    return new_pos, shoot_pos
+end
+
+-- 13) Tornado3D - Tornado-like ascending spiral
+local function pat_Tornado3D(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local cycles = 3
+    local progress = (ang / (2 * math.pi * cycles)) % 1
+    local current_r = r * (1 - progress * 0.6)  -- Radius decreases as it rises
+    
+    local x = current_r * math.cos(ang * cycles)
+    local z = current_r * math.sin(ang * cycles)
+    local y = height + (50 * progress)  -- Rise up
+    
+    local new_pos = shoot_pos + Vector3.new(x, y, z)
+    return new_pos, shoot_pos
+end
+
+-- 14) Wave3D - 3D wave pattern
+local function pat_Wave3D(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local x = r * math.cos(ang)
+    local z = r * math.sin(ang)
+    local y = height + (15 * math.sin(ang * 3)) + (10 * math.cos(ang * 1.5))
+    
+    -- Add perpendicular wave motion
+    local wave_offset = 5 * math.sin(ang * 4)
+    local perpendicular_x = -z / r * wave_offset
+    local perpendicular_z = x / r * wave_offset
+    
+    local new_pos = shoot_pos + Vector3.new(x + perpendicular_x, y, z + perpendicular_z)
+    return new_pos, shoot_pos
+end
+
+-- 15) DNA3D - Double helix DNA strand pattern
+local function pat_DNA3D(origin, targetPart, r, ang, height)
+    local shoot_pos = targetPart and targetPart.Position or origin
+    local strand = (math.floor(ang * 2) % 2 == 0) and 1 or -1
+    
+    local offset_ang = strand == 1 and ang or (ang + math.pi)
+    local x = r * math.cos(offset_ang)
+    local z = r * math.sin(offset_ang)
+    local y = height + (25 * math.sin(ang * 0.8))
+    
+    -- Cross-linking between strands
+    local link_factor = math.abs(math.sin(ang * 2))
+    if link_factor > 0.9 then
+        x = x * 0.5
+        z = z * 0.5
+    end
+    
+    local new_pos = shoot_pos + Vector3.new(x, y, z)
+    return new_pos, shoot_pos
+end
+
+------------------------------------------------------------
+-- PATTERN MAP
+------------------------------------------------------------
+
+local patternFuncs = {
+    Orbit = pat_Orbit,
+    Lemniscate = pat_Lemniscate,
+    Rose = pat_Rose,
+    Epicycloid = pat_Epicycloid,
+    Cardioid = pat_Cardioid,
+    Butterfly = pat_Butterfly,
+    Spiral = pat_Spiral,
+    Star = pat_Star,
+    Clover = pat_Clover,
+    Cyclone = pat_Cyclone,
+    Helix3D = pat_Helix3D,
+    Sphere3D = pat_Sphere3D,
+    Tornado3D = pat_Tornado3D,
+    Wave3D = pat_Wave3D,
+    DNA3D = pat_DNA3D,
+}
+
+------------------------------------------------------------
+-- RAGEBOT STRAFE OVERRIDE
+------------------------------------------------------------
+
+api:ragebot_strafe_override(function(position, unsafe, part)
+    if unsafe then
+        return
+    end
+    
+    if not V(u_enable, true) then
+        return
+    end
+
+    local now = os.clock()
+    local dt = math.clamp(now - (state.t or now), 1 / 240, 0.2)
+    state.t = now
+    
+    local speed = V(u_speed, 4)
+    state.ang = (state.ang or 0) + speed * dt
+    state.ro = (state.ro or 0) + speed * 0.6 * dt
+
+    local origin = part and part.Position or position or Vector3.zero
+    local target_pos = origin
+
+    -- Calculate radius with oscillation
+    local rmin = V(u_rmin, 12)
+    local rmax = V(u_rmax, 24)
+    
+    if rmin > rmax then
+        rmin, rmax = rmax, rmin
+    end
+    
+    rmin = math.max(2, rmin)
+    rmax = math.max(rmin, rmax)
+    
+    local mid = 0.5 * (rmin + rmax)
+    local amp = (rmax - rmin) * 0.5
+    local r = mid + amp * math.sin(state.ro)
+    
+    local height = V(u_height, 15)
+
+    -- Auto ground detection
+    if auto_ground and auto_ground.Value and target_pos then
+        local gy = groundYAt(target_pos, part and part.Parent)
+        if gy then
+            local gap = target_pos.Y - gy
+            -- If target is near ground (within reasonable range)
+            if gap >= -40 and gap <= 35 then
+                local spiralRadius = V(ground_radius, 2)
+                local spiralHeight = V(ground_height, 3)
+                local groundSpeedMult = V(ground_speed, 3)
+                local a = state.ang * groundSpeedMult
+                
+                local shoot_pos = part and part.Position or origin
+                local new_pos = Vector3.new(
+                    target_pos.X + spiralRadius * math.cos(a),
+                    gy + spiralHeight,
+                    target_pos.Z + spiralRadius * math.sin(a)
+                )
+                
+                return face(origin, new_pos), shoot_pos
+            end
+        end
+    end
+
+    -- Get selected pattern
+    local pattName = V(u_pattern, "Orbit")
+    local fn = patternFuncs[pattName] or pat_Orbit
+
+    -- Execute pattern function
+    local new_pos, shoot_pos = fn(origin, part, r, state.ang, height)
+    
+    if not new_pos then
+        return
+    end
+
+    -- Return CFrame facing target with shoot position override
+    if shoot_pos then
+        return face(origin, new_pos), shoot_pos
+    else
+        return face(origin, new_pos)
+    end
+end)
+
+api:notify("Custom Strafe Loaded - 15 Patterns (5 3D)", 3)

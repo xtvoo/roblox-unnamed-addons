@@ -1,0 +1,640 @@
+api:set_lua_name("AutoBag_Rage_Pro")
+
+local Handler = loadstring(game:HttpGet("https://raw.githubusercontent.com/XK5NG/XK5NG.github.io/main/Handler"))()
+local Players = Handler:CloneRef("Players")
+local RunService = Handler:CloneRef("RunService")
+local Workspace = Handler:CloneRef("Workspace")
+local LocalPlayer = Players.LocalPlayer
+
+-- ========== UI SETUP ==========
+-- ========== UI SETUP ==========
+local Tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local Main = Tab:AddLeftGroupbox("Auto Kill - Main")
+local Bagging = Tab:AddRightGroupbox("Auto Kill - Bagging")
+local Safety = Tab:AddLeftGroupbox("Auto Kill - Safety")
+
+Main:AddToggle("MasterSwitch", { Text = "Enable Auto Bag", Default = false })
+Main:AddDropdown("KillModeDropdown", { 
+    Values = {"Normal Ragebot", "Flamethrower Hack"}, 
+    Default = 1, 
+    Text = "Kill Method" 
+})
+Main:AddToggle("AutoStomp", {
+    Text = "Auto Stomp Knocked",
+    Default = true,
+    Tooltip = "Stomp knocked targets before bagging"
+})
+
+Bagging:AddDropdown("BagStrategy", {
+    Values = {"Adaptive", "Behind", "Below", "Aggressive Spin"},
+    Default = 1,
+    Text = "Bag Position Strategy",
+    Tooltip = "Adaptive tries multiple positions"
+})
+Bagging:AddSlider("BagSpamRate", { 
+    Text = "Bag Spam Rate", 
+    Default = 5, 
+    Min = 1, 
+    Max = 10, 
+    Rounding = 0, 
+    Suffix = " bags/sec" 
+})
+Bagging:AddSlider("BagDistance", {
+    Text = "Behind Distance",
+    Default = 2.5,
+    Min = 0.5,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddSlider("BagHeight", {
+    Text = "Below Height",
+    Default = 2,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddToggle("AdaptiveBag", { 
+    Text = "Auto Adjust Position", 
+    Default = true, 
+    Tooltip = "Changes position if bag fails" 
+})
+Bagging:AddDivider()
+Bagging:AddToggle("PreFireBag", {
+    Text = "Pre-Fire Bagging",
+    Default = true,
+    Tooltip = "Start bagging before they fully die"
+})
+Bagging:AddSlider("PreFireDelay", {
+    Text = "Pre-Fire Delay",
+    Default = 0.2,
+    Min = 0,
+    Max = 1,
+    Rounding = 2,
+    Suffix = " seconds",
+    Tooltip = "Time after bag removal to start re-bagging"
+})
+
+Safety:AddToggle("VoidWhenAlive", {
+    Text = "Void When Target Alive",
+    Default = true,
+    Tooltip = "Go to void when target can shoot back"
+})
+Safety:AddToggle("CheckToolStatus", {
+    Text = "Check Tool Status",
+    Default = true,
+    Tooltip = "Only void if they have a gun equipped"
+})
+Safety:AddToggle("DebugMode", { Text = "Debug Notifications", Default = false })
+
+-- ========== FLAGS ==========
+local Flags = {
+    RageTarget = api:get_ui_object("ragebot_targets"),
+    RageFlame  = api:get_ui_object("ragebot_flame"),
+    VoidProt   = api:get_ui_object("character_prot_void"),
+}
+
+-- ========== STATE ==========
+local State = {
+    Target = nil,
+    IsBagged = false,
+    IsKnocked = false,
+    LastSetTarget = "",
+    BuyingBag = false,
+    LastBuyTime = 0,
+    BagAttempts = 0,
+    LastBagCheck = 0,
+    LastBagAttempt = 0,
+    Mode = "idle",
+    CurrentStrategy = 1,
+    StrategyFailCount = 0,
+    LastBagSuccess = 0,
+    BagRemovedTime = 0,
+    WasJustBagged = false,
+    ShouldVoid = false,
+}
+
+-- ========== BAG POSITION STRATEGIES ==========
+local BagStrategies = {
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local behind = targetRoot.CFrame.LookVector * -distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + behind + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local below = Vector3.new(0, -(height + 1), 0)
+        return CFrame.new(targetRoot.Position + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local behind = targetRoot.CFrame.LookVector * -(distance + 0.5)
+        local below = Vector3.new(0, -(height + 0.5), 0)
+        return CFrame.new(targetRoot.Position + behind + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local left = targetRoot.CFrame.RightVector * -distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + left + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local right = targetRoot.CFrame.RightVector * distance
+        local below = Vector3.new(0, -height, 0)
+        return CFrame.new(targetRoot.Position + right + below, targetRoot.Position)
+    end,
+    function(targetRoot)
+        local distance = Options.BagDistance and Options.BagDistance.Value or 2.5
+        local height = Options.BagHeight and Options.BagHeight.Value or 2
+        local angle = (tick() % (math.pi * 2))
+        local offset = Vector3.new(
+            math.cos(angle) * distance, 
+            -height, 
+            math.sin(angle) * distance
+        )
+        return CFrame.new(targetRoot.Position + offset, targetRoot.Position)
+    end,
+}
+
+-- ========== HELPER FUNCTIONS ==========
+local function DebugLog(message)
+    if Toggles.DebugMode and Toggles.DebugMode.Value then
+        api:notify(message, 2)
+    end
+end
+
+local function UpdateTargetUI(name)
+    if Flags.RageTarget and State.LastSetTarget ~= name then
+        State.LastSetTarget = name
+        Flags.RageTarget:SetValue(name)
+    end
+end
+
+local function SetFlameMode(enabled)
+    if Flags.RageFlame and Flags.RageFlame.Value ~= enabled then
+        Flags.RageFlame:SetValue(enabled)
+    end
+end
+
+local function SetVoid(enabled)
+    if Flags.VoidProt and Flags.VoidProt.Value ~= enabled then
+        Flags.VoidProt:SetValue(enabled)
+    end
+end
+
+local function GetBagTool()
+    if not LocalPlayer.Character then return nil end
+    local bag = LocalPlayer.Character:FindFirstChild("[BrownBag]")
+    if not bag then
+        bag = LocalPlayer.Backpack:FindFirstChild("[BrownBag]")
+    end
+    return bag
+end
+
+local function IsBagged(target)
+    if not target or not target.Character then return false end
+    local TargetModel = Workspace.Players.Model:FindFirstChild(target.Name)
+    if not TargetModel then return false end
+    
+    return TargetModel:FindFirstChild("Christmas_Sock") ~= nil or 
+           TargetModel:FindFirstChild("BrownBag") ~= nil or
+           TargetModel:FindFirstChild("Bag") ~= nil
+end
+
+local function IsKnocked(player)
+    if not player then return false end
+    
+    local statusCache = api:get_status_cache(player)
+    if not statusCache then return false end
+    
+    return statusCache["K.O"] == true
+end
+
+local function IsTargetValid(player)
+    if not player or not player.Character then return false end
+    
+    local statusCache = api:get_status_cache(player)
+    if not statusCache then return false end
+    
+    -- Don't filter out knocked players anymore
+    if statusCache.Dead or statusCache.Grabbed then
+        return false
+    end
+    
+    local charCache = api:get_character_cache(player)
+    if not charCache or not charCache.HumanoidRootPart then return false end
+    
+    return true
+end
+
+local function TargetHasGun(target)
+    if not target or not target.Character then return false end
+    
+    local tool = target.Character:FindFirstChildOfClass("Tool")
+    if not tool then return false end
+    
+    if not tool:FindFirstChild("Handle") then return false end
+    
+    local gunPatterns = {
+        "Shotgun", "Rifle", "Pistol", "Revolver", "SMG", 
+        "AR", "AK", "LMG", "Sniper", "TacticalShotgun",
+        "Double%-Barrel", "Silencer"
+    }
+    
+    for _, pattern in ipairs(gunPatterns) do
+        if string.find(tool.Name, pattern) then
+            return true
+        end
+    end
+    
+    return false
+end
+
+local function ShouldVoidFromTarget()
+    if not (Toggles.VoidWhenAlive and Toggles.VoidWhenAlive.Value) then
+        return false
+    end
+    
+    if not State.Target or State.IsBagged or State.IsKnocked then
+        return false
+    end
+    
+    -- Check if tool status check is enabled
+    if Toggles.CheckToolStatus and Toggles.CheckToolStatus.Value then
+        if not TargetHasGun(State.Target) then
+            DebugLog("Target has no gun - no void needed")
+            return false
+        end
+    end
+    
+    DebugLog("Target alive with gun - voiding")
+    return true
+end
+
+local function ShouldStartBagging()
+    if not (Toggles.PreFireBag and Toggles.PreFireBag.Value) then
+        return false
+    end
+    
+    if not State.WasJustBagged then
+        return false
+    end
+    
+    local delay = Options.PreFireDelay and Options.PreFireDelay.Value or 0.2
+    local timeSinceRemoval = tick() - State.BagRemovedTime
+    
+    return timeSinceRemoval >= delay
+end
+
+-- ========== BAG OPERATIONS ==========
+local function UseBag()
+    local currentTime = tick()
+    local spamRate = Options.BagSpamRate and Options.BagSpamRate.Value or 5
+    local spamDelay = 1 / spamRate
+    
+    if currentTime - State.LastBagAttempt < spamDelay then
+        return false
+    end
+    
+    local Bag = GetBagTool()
+    
+    if not Bag then 
+        if api:can_desync() and not State.BuyingBag then
+            local rbStatus = api:get_ragebot_status()
+            if rbStatus ~= "buying" and currentTime - State.LastBuyTime > 2 then
+                State.BuyingBag = true
+                State.LastBuyTime = currentTime
+                
+                task.spawn(function()
+                    DebugLog("Buying bag...")
+                    api:buy_item("brownbag", false, true)
+                    task.wait(1.2)
+                    State.BuyingBag = false
+                end)
+            end
+        end
+        return false
+    end
+    
+    if Bag.Parent == LocalPlayer.Backpack then
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:EquipTool(Bag)
+            task.wait(0.03)
+        end
+    end
+    
+    if Bag.Parent == LocalPlayer.Character then
+        Bag:Activate()
+        State.LastBagAttempt = currentTime
+        State.BagAttempts = State.BagAttempts + 1
+        return true
+    end
+    
+    return false
+end
+
+local function GetBagPosition(targetRoot)
+    local strategy = Options.BagStrategy and Options.BagStrategy.Value or "Adaptive"
+    
+    if strategy == "Adaptive" then
+        if Toggles.AdaptiveBag and Toggles.AdaptiveBag.Value then
+            if tick() - State.LastBagSuccess > 2 or State.StrategyFailCount > 10 then
+                State.CurrentStrategy = (State.CurrentStrategy % #BagStrategies) + 1
+                State.StrategyFailCount = 0
+                DebugLog("Strategy: " .. State.CurrentStrategy)
+            end
+        end
+        return BagStrategies[State.CurrentStrategy](targetRoot)
+    elseif strategy == "Behind" then
+        return BagStrategies[1](targetRoot)
+    elseif strategy == "Below" then
+        return BagStrategies[2](targetRoot)
+    elseif strategy == "Aggressive Spin" then
+        return BagStrategies[6](targetRoot)
+    end
+    
+    return BagStrategies[1](targetRoot)
+end
+
+-- ========== MAIN LOGIC LOOP ==========
+task.spawn(function()
+    while true do
+        task.wait(0.03)
+        
+        if not (Toggles.MasterSwitch and Toggles.MasterSwitch.Value) then
+            if State.Mode ~= "idle" then
+                api:set_ragebot(false)
+                SetFlameMode(false)
+                SetVoid(false)
+                State.Mode = "idle"
+                State.LastSetTarget = ""
+                State.BuyingBag = false
+                State.WasJustBagged = false
+                State.ShouldVoid = false
+            end
+            task.wait(0.1)
+            continue
+        end
+        
+        -- Get target
+        local NewTarget = api:get_target("silent") or api:get_target("aimbot")
+        
+        if not NewTarget then
+            local MyChar = LocalPlayer.Character
+            if MyChar then
+                local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+                if MyRoot then
+                    local ClosestDist = 150
+                    local ClosestPlr = nil
+                    
+                    for _, Player in ipairs(Players:GetPlayers()) do
+                        if Player ~= LocalPlayer and IsTargetValid(Player) then
+                            local charCache = api:get_character_cache(Player)
+                            if charCache and charCache.HumanoidRootPart then
+                                local Dist = (charCache.HumanoidRootPart.Position - MyRoot.Position).Magnitude
+                                if Dist < ClosestDist then
+                                    ClosestDist = Dist
+                                    ClosestPlr = Player
+                                end
+                            end
+                        end
+                    end
+                    
+                    NewTarget = ClosestPlr
+                end
+            end
+        end
+        
+        -- Target changed
+        if State.Target ~= NewTarget then
+            State.Target = NewTarget
+            State.BagAttempts = 0
+            State.CurrentStrategy = 1
+            State.StrategyFailCount = 0
+            State.WasJustBagged = false
+            State.ShouldVoid = false
+            State.IsKnocked = false
+            
+            if NewTarget then
+                DebugLog("Target: " .. NewTarget.Name)
+            end
+        end
+        
+        -- Process target
+        if State.Target and IsTargetValid(State.Target) then
+            local currentTime = tick()
+            
+            -- Update knocked status
+            State.IsKnocked = IsKnocked(State.Target)
+            
+            -- Update bag status
+            if currentTime - State.LastBagCheck > 0.15 then
+                local wasBagged = State.IsBagged
+                State.IsBagged = IsBagged(State.Target)
+                State.LastBagCheck = currentTime
+                
+                if not wasBagged and State.IsBagged then
+                    State.LastBagSuccess = currentTime
+                    State.StrategyFailCount = 0
+                    State.WasJustBagged = true
+                    DebugLog("Bagged!")
+                end
+                
+                if wasBagged and not State.IsBagged then
+                    State.BagRemovedTime = currentTime
+                    DebugLog("Bag removed - preparing pre-fire")
+                end
+            end
+            
+            -- Check if we should void
+            State.ShouldVoid = ShouldVoidFromTarget()
+            
+            local shouldKill = State.IsBagged and not State.BuyingBag
+            local shouldStomp = State.IsKnocked and not State.IsBagged and (Toggles.AutoStomp and Toggles.AutoStomp.Value)
+            local shouldPreFireBag = not State.IsBagged and not State.IsKnocked and ShouldStartBagging()
+            
+            if State.ShouldVoid then
+                -- === VOID SAFETY MODE ===
+                if State.Mode ~= "void_safety" then
+                    State.Mode = "void_safety"
+                    DebugLog("VOID SAFETY")
+                end
+                
+                SetVoid(true)
+                SetFlameMode(false)
+                api:set_ragebot(false)
+                UpdateTargetUI("nil")
+                
+            elseif shouldStomp then
+                -- === STOMP MODE ===
+                if State.Mode ~= "stomping" then
+                    State.Mode = "stomping"
+                    DebugLog("STOMPING")
+                end
+                
+                SetVoid(false)
+                UpdateTargetUI(State.Target.Name)
+                SetFlameMode(false)
+                api:set_ragebot(true) -- Ragebot will handle stomping
+                
+            elseif shouldKill then
+                -- === KILL MODE ===
+                if State.Mode ~= "killing" then
+                    State.Mode = "killing"
+                    DebugLog("KILLING")
+                end
+                
+                SetVoid(false)
+                UpdateTargetUI(State.Target.Name)
+                
+                if Options.KillModeDropdown.Value == "Normal Ragebot" then
+                    SetFlameMode(false)
+                else
+                    SetFlameMode(true)
+                end
+                
+                api:set_ragebot(true)
+                
+            elseif shouldPreFireBag then
+                -- === PRE-FIRE BAG MODE ===
+                if State.Mode ~= "prefire_bagging" then
+                    State.Mode = "prefire_bagging"
+                    State.BagAttempts = 0
+                    DebugLog("PRE-FIRE BAGGING")
+                end
+                
+                SetVoid(false)
+                SetFlameMode(false)
+                api:set_ragebot(false)
+                UpdateTargetUI("nil")
+                
+                if not State.BuyingBag then
+                    UseBag()
+                end
+                
+            else
+                -- === NORMAL BAG MODE ===
+                if State.Mode ~= "bagging" then
+                    State.Mode = "bagging"
+                    State.BagAttempts = 0
+                    DebugLog("BAGGING")
+                end
+                
+                SetVoid(false)
+                SetFlameMode(false)
+                api:set_ragebot(false)
+                UpdateTargetUI("nil")
+                
+                if not State.BuyingBag then
+                    UseBag()
+                    
+                    if currentTime - State.LastBagSuccess > 1 then
+                        State.StrategyFailCount = State.StrategyFailCount + 1
+                    end
+                end
+            end
+        else
+            -- === IDLE MODE ===
+            if State.Mode ~= "idle" then
+                State.Mode = "idle"
+                State.LastSetTarget = ""
+                api:set_ragebot(false)
+                SetFlameMode(false)
+                SetVoid(false)
+                State.WasJustBagged = false
+                State.ShouldVoid = false
+                State.IsKnocked = false
+            end
+        end
+    end
+end)
+
+-- ========== PHYSICS LOOP ==========
+local PhysicsConnection = api:add_connection(RunService.Heartbeat:Connect(function()
+    if not (Toggles.MasterSwitch and Toggles.MasterSwitch.Value) or not State.Target then 
+        return 
+    end
+    
+    if State.BuyingBag or State.ShouldVoid then
+        return
+    end
+    
+    local MyChar = LocalPlayer.Character
+    if not MyChar then return end
+    local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+    
+    local TargetChar = State.Target.Character
+    if not TargetChar then return end
+    local TargetRoot = TargetChar:FindFirstChild("HumanoidRootPart")
+    
+    if MyRoot and TargetRoot then
+        -- If in kill or stomp mode, unglue
+        if (State.IsBagged and State.Mode == "killing") or (State.IsKnocked and State.Mode == "stomping") then
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", nil)
+            end)
+            return
+        end
+        
+        -- If in bag mode or pre-fire mode, glue and position
+        if State.Mode == "bagging" or State.Mode == "prefire_bagging" then
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
+            end)
+            
+            local GlueCFrame = GetBagPosition(TargetRoot)
+            api:set_desync_cframe(GlueCFrame)
+        end
+    end
+end))
+
+-- ========== EVENT HANDLERS ==========
+api:on_event("localplayer_died", function()
+    State.Target = nil
+    State.IsBagged = false
+    State.IsKnocked = false
+    State.BuyingBag = false
+    State.Mode = "idle"
+    State.CurrentStrategy = 1
+    State.WasJustBagged = false
+    State.ShouldVoid = false
+end)
+
+api:on_event("localplayer_spawned", function(character)
+    State.BagAttempts = 0
+    State.StrategyFailCount = 0
+end)
+
+api:on_event("unload", function()
+    api:notify("Auto Bag Pro unloaded", 2)
+    
+    api:set_ragebot(false)
+    SetFlameMode(false)
+    SetVoid(false)
+    State.BuyingBag = false
+    
+    if PhysicsConnection then
+        pcall(function()
+            PhysicsConnection:Disconnect()
+        end)
+    end
+    
+    if LocalPlayer.Character then
+        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            pcall(function()
+                sethiddenproperty(root, "PhysicsRepRootPart", nil)
+            end)
+        end
+    end
+end)
+
+api:notify("Auto Bag Pro loaded", 3)

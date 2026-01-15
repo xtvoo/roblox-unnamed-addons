@@ -1,0 +1,102 @@
+api:set_lua_name("silent_money_logger")
+
+local Players = game:GetService("Players")
+
+local watching = false
+local conn
+
+local function copyToClipboard(str)
+    if setclipboard then
+        setclipboard(str)
+    elseif toclipboard then
+        toclipboard(str)
+    end
+end
+
+local function getSilentTarget()
+    local cache = api:get_target_cache("silent") -- {player, part}[file:11]
+    return cache and cache.player
+end
+
+local function getPlayerCurrency(player)
+    local data = api:get_data_cache(player)      -- includes Currency[file:11]
+    return data and data.Currency
+end
+
+local function copyTargetPos(target)
+    local charCache = api:get_character_cache(target) -- faster char access[file:11]
+    local root = charCache and charCache.HumanoidRootPart or charCache and charCache.LowerTorso
+    if not root then
+        api:notify("no root for target", 2)
+        return
+    end
+
+    local pos = root.Position
+    local cfStr = string.format("CFrame.new(%f, %f, %f)", pos.X, pos.Y, pos.Z)
+    copyToClipboard(cfStr)
+    api:notify("copied target CFrame: "..cfStr, 3)
+end
+
+local function startWatching()
+    if watching then return end
+    watching = true
+    api:notify("silent target money watcher on", 2)
+
+    conn = game:GetService("RunService").Heartbeat:Connect(function()
+        if not watching then return end
+
+        local target = getSilentTarget()
+        if not target then
+            return
+        end
+
+        -- pull data cache each frame; it’s cached internally by UE[file:11]
+        local currencyNow = getPlayerCurrency(target)
+        if currencyNow == nil then
+            return
+        end
+
+        -- store previous currency per-target
+        target.__lastCurrency = target.__lastCurrency or currencyNow
+        if currencyNow < target.__lastCurrency then
+            -- target’s money went down -> copy their pos instantly
+            copyTargetPos(target)
+        end
+
+        target.__lastCurrency = currencyNow
+    end)
+end
+
+local function stopWatching()
+    watching = false
+    if conn then
+        conn:Disconnect()
+        conn = nil
+    end
+    api:notify("silent target money watcher off", 2)
+end
+
+-- UI: simple toggle in its own tab
+local tabs = {
+    lua = api:AddTab("Silent Tools")
+}
+
+do
+    local gb = tabs.lua:AddLeftGroupbox("Money Logger")
+    gb:AddToggle("silent_money_watch", {
+        Text = "Watch silent target money",
+        Default = false,
+        Callback = function(state)
+            if state then
+                startWatching()
+            else
+                stopWatching()
+            end
+        end
+    })
+end
+
+api:on_event("unload", function()
+    stopWatching()
+    api:notify("unloaded", 2)
+end)

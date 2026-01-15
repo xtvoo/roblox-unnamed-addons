@@ -1,0 +1,136 @@
+api:set_lua_name("find_richest")
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player_data = {}
+local richest_list = {}
+
+-- Get player's donation data safely
+local function get_player_donations(player)
+    local donated = 0
+    pcall(function()
+        if player:FindFirstChild("DataFolder") then
+            local df = player:FindFirstChild("DataFolder")
+            if df:FindFirstChild("RobuxDonated") then
+                donated = df:FindFirstChild("RobuxDonated").Value
+            end
+        end
+    end)
+    return donated
+end
+
+-- Update all player data and sort by richest
+local function update_richest()
+    player_data = {}
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        local donated = get_player_donations(player)
+        player_data[player.Name] = donated
+    end
+    
+    -- Sort players by donations
+    richest_list = {}
+    for name, donated in pairs(player_data) do
+        table.insert(richest_list, {name = name, donated = donated})
+    end
+    table.sort(richest_list, function(a, b)
+        return a.donated > b.donated
+    end)
+end
+
+-- Create UI
+local tab = api:AddTab("Richest Finder")
+local groupbox = tab:AddLeftGroupbox("👑 Top Donors")
+
+-- Auto refresh toggle
+groupbox:AddToggle("auto_refresh", {
+    Text = "Auto Refresh Data",
+    Default = true
+})
+
+-- Manual refresh button
+groupbox:AddButton("🔄 Refresh Now", function()
+    update_richest()
+    api:notify("Data refreshed!", 2)
+end)
+
+-- Separator
+groupbox:AddLabel("━━━━━━━━━━━━━━━━")
+
+-- Top 10 display
+local top_labels = {}
+for i = 1, 10 do
+    table.insert(top_labels, groupbox:AddLabel(""))
+end
+
+-- Auto update loop
+local conn = api:add_connection(RunService.Heartbeat:Connect(function()
+    if not api:get_ui_object("auto_refresh").Value then
+        return
+    end
+    
+    update_richest()
+    
+    -- Update labels
+    for i = 1, 10 do
+        if richest_list[i] then
+            local rank = i
+            local player_name = richest_list[i].name
+            local donated = richest_list[i].donated
+            
+            local emoji = "  "
+            if rank == 1 then emoji = "🥇 " end
+            if rank == 2 then emoji = "🥈 " end
+            if rank == 3 then emoji = "🥉 " end
+            
+            top_labels[i]:SetText(string.format("%s#%d: %s - %d Robux", emoji, rank, player_name, donated))
+        else
+            top_labels[i]:SetText("")
+        end
+    end
+end))
+
+-- Teleport to richest button
+groupbox:AddLabel("━━━━━━━━━━━━━━━━")
+groupbox:AddButton("📍 Go to Richest Player", function()
+    if richest_list[1] then
+        local target = Players:FindFirstChild(richest_list[1].name)
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            api:teleport(target.Character.HumanoidRootPart.CFrame + Vector3.new(5, 0, 0))
+            api:notify("Teleported to " .. richest_list[1].name, 2)
+        end
+    else
+        api:notify("No players found!", 2)
+    end
+end)
+
+-- Print full leaderboard to console
+groupbox:AddButton("📊 Print Leaderboard", function()
+    update_richest()
+    print("\n=== 💰 RICHEST PLAYERS IN SERVER ===\n")
+    for i, data in ipairs(richest_list) do
+        print(string.format("#%d - %s: %d Robux", i, data.name, data.donated))
+    end
+    print("\n=====================================\n")
+    api:notify("Check console for full leaderboard!", 2)
+end)
+
+-- Get single richest info
+groupbox:AddLabel("━━━━━━━━━━━━━━━━")
+local richest_label = groupbox:AddLabel("👑 Richest: Loading...")
+
+api:add_connection(RunService.Heartbeat:Connect(function()
+    if richest_list[1] then
+        richest_label:SetText(string.format("👑 Richest: %s (%d Robux)", richest_list[1].name, richest_list[1].donated))
+    end
+end))
+
+-- Cleanup
+api:on_event("unload", function()
+    api:notify("Richest Finder unloaded", 2)
+end)
+
+-- Initial load
+update_richest()
+api:notify("Richest Finder loaded!", 2)

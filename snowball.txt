@@ -1,0 +1,304 @@
+-- Set the lua name
+api:set_lua_name("Snowball Manager")
+
+-- // Services
+local players_service = cloneref(game:GetService("Players"))
+local local_player = players_service.LocalPlayer
+local replicated_storage = cloneref(game:GetService("ReplicatedStorage"))
+local run_service = cloneref(game:GetService("RunService"))
+
+-- // Config
+local snowball_location = CFrame.new(0, 10, 0) -- Default location
+local is_grabbing = false
+
+----------------------------------------------------------------------
+-- Desync Callback
+----------------------------------------------------------------------
+
+api:add_desync_callback(2, function()
+    if is_grabbing then
+        return snowball_location
+    end
+    return nil
+end)
+
+----------------------------------------------------------------------
+-- Snowball Functions
+----------------------------------------------------------------------
+
+local function grab_snowballs()
+    task.spawn(function()
+        if not api:can_desync() then
+            api:notify("⚠️ Cannot desync right now!", 2)
+            return
+        end
+        
+        local amount = Options.snowball_amount and Options.snowball_amount.Value or 1
+        local delay = Options.grab_delay and Options.grab_delay.Value or 1
+        
+        api:notify("🔄 Desyncing to snowball location...", 2)
+        is_grabbing = true
+        task.wait(0.3) -- Wait for desync to activate
+        
+        api:notify("⛄ Grabbing " .. amount .. " snowball(s) (Delay: " .. delay .. "s)...", 2)
+        
+        for i = 1, amount do
+            pcall(function()
+                local args = {"PickSnow"}
+                replicated_storage:WaitForChild("MainEvent"):FireServer(unpack(args))
+            end)
+            
+            if i < amount then
+                api:notify("⛄ Grabbed " .. i .. "/" .. amount .. " snowballs...", 1)
+                task.wait(delay) -- Use configurable delay
+            end
+        end
+        
+        is_grabbing = false -- Stop desyncing
+        api:notify("✅ Finished grabbing " .. amount .. " snowballs!", 2)
+    end)
+end
+
+local function throw_all_snowballs()
+    task.spawn(function()
+        local count = 0
+        local throw_delay = Options.throw_delay and Options.throw_delay.Value or 0.2
+        
+        -- Count snowballs in backpack
+        for _, tool in ipairs(local_player.Backpack:GetChildren()) do
+            if tool.Name:lower():find("snow") or (tool.ToolTip and tool.ToolTip:lower():find("snow")) then
+                count += 1
+            end
+        end
+        
+        if count == 0 then
+            api:notify("❌ No snowballs in backpack!", 2)
+            return
+        end
+        
+        api:notify("❄️ Throwing " .. count .. " snowballs (Delay: " .. throw_delay .. "s)...", 2)
+        
+        local thrown = 0
+        
+        -- Equip and throw each snowball
+        for _, tool in ipairs(local_player.Backpack:GetChildren()) do
+            if tool.Name:lower():find("snow") or (tool.ToolTip and tool.ToolTip:lower():find("snow")) then
+                tool.Parent = local_player.Character
+                task.wait(0.05)
+                tool:Activate()
+                task.wait(0.05)
+                tool:Activate()
+                
+                thrown += 1
+                
+                -- Wait between each snowball throw (except for the last one)
+                if thrown < count then
+                    api:notify("⛄ Threw " .. thrown .. "/" .. count .. " snowballs...", 1)
+                    task.wait(throw_delay)
+                end
+            end
+        end
+        
+        api:notify("⛄ ALL " .. count .. " SNOWBALLS THROWN! ⛄", 3)
+    end)
+end
+
+local function set_snowball_location()
+    if local_player.Character and local_player.Character:FindFirstChild("HumanoidRootPart") then
+        snowball_location = local_player.Character.HumanoidRootPart.CFrame
+        api:notify("📍 Snowball location set to current position!", 2)
+    else
+        api:notify("❌ Character not found!", 2)
+    end
+end
+
+local function auto_farm()
+    task.spawn(function()
+        local auto_enabled = Toggles.auto_farm_toggle and Toggles.auto_farm_toggle.Value or false
+        
+        while auto_enabled and task.wait(1) do
+            auto_enabled = Toggles.auto_farm_toggle and Toggles.auto_farm_toggle.Value or false
+            
+            if not auto_enabled then break end
+            
+            -- Count current snowballs
+            local current_count = 0
+            for _, tool in ipairs(local_player.Backpack:GetChildren()) do
+                if tool.Name:lower():find("snow") or (tool.ToolTip and tool.ToolTip:lower():find("snow")) then
+                    current_count += 1
+                end
+            end
+            
+            local max_amount = Options.auto_farm_max and Options.auto_farm_max.Value or 10
+            
+            if current_count < max_amount then
+                grab_snowballs()
+                local grab_delay = Options.grab_delay and Options.grab_delay.Value or 1
+                local snowball_amount = Options.snowball_amount and Options.snowball_amount.Value or 1
+                -- Wait for all snowballs to be grabbed
+                task.wait((snowball_amount * grab_delay) + 2)
+            end
+            
+            task.wait(2)
+        end
+    end)
+end
+
+----------------------------------------------------------------------
+-- UI
+----------------------------------------------------------------------
+
+local tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local mainGroup = tab:AddLeftGroupbox("Snowball Manager")
+local settings = tab:AddRightGroupbox("Snowball Settings")
+
+mainGroup:AddLabel("⛄ Snowball Controls ⛄")
+
+mainGroup:AddSlider("snowball_amount", {
+    Text = "Snowball Amount",
+    Default = 1,
+    Min = 1,
+    Max = 20,
+    Rounding = 0,
+    Compact = false,
+    Tooltip = "How many snowballs to grab"
+})
+
+mainGroup:AddSlider("grab_delay", {
+    Text = "Grab Delay",
+    Default = 1,
+    Min = 0.5,
+    Max = 5,
+    Rounding = 1,
+    Compact = false,
+    Suffix = "s",
+    Tooltip = "Delay between each snowball grab (for cooldown)"
+})
+
+mainGroup:AddDivider()
+
+mainGroup:AddButton({
+    Text = "⛄ Grab Snowballs (Desync)",
+    Func = grab_snowballs,
+    Tooltip = "Desync to location and grab snowballs"
+})
+
+mainGroup:AddDivider()
+
+mainGroup:AddSlider("throw_delay", {
+    Text = "Throw Delay",
+    Default = 0.2,
+    Min = 0.1,
+    Max = 2,
+    Rounding = 1,
+    Compact = false,
+    Suffix = "s",
+    Tooltip = "Delay between each snowball throw"
+})
+
+mainGroup:AddButton({
+    Text = "❄️ THROW ALL SNOWBALLS ❄️",
+    Func = throw_all_snowballs,
+    Tooltip = "Equip and throw all snowballs at once"
+})
+
+mainGroup:AddDivider()
+
+mainGroup:AddToggle("auto_farm_toggle", {
+    Text = "Auto Farm Snowballs",
+    Default = false,
+    Tooltip = "Automatically grab snowballs",
+    Callback = function(v)
+        api:notify("Auto Farm " .. (v and "Enabled" or "Disabled"), 2)
+        if v then
+            auto_farm()
+        end
+    end
+})
+
+mainGroup:AddSlider("auto_farm_max", {
+    Text = "Max Snowballs",
+    Default = 10,
+    Min = 5,
+    Max = 30,
+    Rounding = 0,
+    Compact = false,
+    Tooltip = "Auto farm until you have this many"
+})
+
+-- Settings
+settings:AddLabel("📍 Snowball Location 📍")
+
+settings:AddButton({
+    Text = "📍 Set Current Position",
+    Func = set_snowball_location,
+    Tooltip = "Set snowball spawn to your current location"
+})
+
+settings:AddDivider()
+
+settings:AddLabel("Manual CFrame Input:")
+
+settings:AddInput("snowball_x", {
+    Default = "0",
+    Numeric = true,
+    Finished = true,
+    Text = "X Position",
+    Placeholder = "0",
+    Callback = function(value)
+        local x = tonumber(value) or 0
+        local y = snowball_location.Y
+        local z = snowball_location.Z
+        snowball_location = CFrame.new(x, y, z)
+        api:notify("Location updated: " .. x .. ", " .. y .. ", " .. z, 2)
+    end
+})
+
+settings:AddInput("snowball_y", {
+    Default = "10",
+    Numeric = true,
+    Finished = true,
+    Text = "Y Position",
+    Placeholder = "10",
+    Callback = function(value)
+        local x = snowball_location.X
+        local y = tonumber(value) or 10
+        local z = snowball_location.Z
+        snowball_location = CFrame.new(x, y, z)
+        api:notify("Location updated: " .. x .. ", " .. y .. ", " .. z, 2)
+    end
+})
+
+settings:AddInput("snowball_z", {
+    Default = "0",
+    Numeric = true,
+    Finished = true,
+    Text = "Z Position",
+    Placeholder = "0",
+    Callback = function(value)
+        local x = snowball_location.X
+        local y = snowball_location.Y
+        local z = tonumber(value) or 0
+        snowball_location = CFrame.new(x, y, z)
+        api:notify("Location updated: " .. x .. ", " .. y .. ", " .. z, 2)
+    end
+})
+
+settings:AddDivider()
+
+settings:AddLabel("ℹ️ Info:")
+settings:AddLabel("Uses desync (invisible TP)")
+settings:AddLabel("Server-side only movement")
+settings:AddLabel("You stay in place visually")
+settings:AddLabel("Adjust delays for cooldowns")
+
+----------------------------------------------------------------------
+-- Unload
+----------------------------------------------------------------------
+
+api:on_event("unload", function()
+    is_grabbing = false
+    api:notify("⛄ Snowball Manager Unloaded", 2)
+end)
+
+api:notify("⛄ SNOWBALL MANAGER LOADED ⛄", 3)

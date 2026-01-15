@@ -1,0 +1,720 @@
+-- Anime Voiceline Addon for Unnamed
+local api = getfenv().api
+if not api then return end
+
+-- Set addon name
+api:set_lua_name("anime_voicelines")
+
+-- Core Variables
+local TweenService = game:GetService("TweenService")
+local OWNER = game:GetService("Players").LocalPlayer
+local OriginalKeyUpValue = 0
+local connections = {}
+
+-- Unload handler
+api:on_event("unload", function()
+    for _, conn in pairs(connections) do
+        if conn then conn:Disconnect() end
+    end
+    api:notify("Anime Voicelines unloaded", 2)
+end)
+
+-- Helper Functions
+function StopAudio()
+    game:GetService("ReplicatedStorage"):WaitForChild("MainEvent"):FireServer("BoomboxStop")
+end
+
+function stop(ID, Key)
+    local cor = coroutine.wrap(function()
+        wait(OWNER.Character.LowerTorso.BOOMBOXSOUND.TimeLength-0.1)
+        if OWNER.Character.LowerTorso.BOOMBOXSOUND.SoundId == "rbxassetid://"..ID and OriginalKeyUpValue == Key then
+            StopAudio()
+        end
+    end)
+    cor()
+end
+
+function AnimPlay(ID, SPEED, Time, Smoothing)
+    for i,v in pairs(OWNER.Character:WaitForChild("Humanoid"):GetPlayingAnimationTracks()) do 
+        if (v.Animation.AnimationId:match("rbxassetid://"..ID)) then v:Stop() end 
+    end
+    local animation = Instance.new('Animation', game:GetService("Workspace"))
+    animation.AnimationId = 'rbxassetid://'..ID
+    local playing = OWNER.Character:WaitForChild("Humanoid"):LoadAnimation(animation)
+    playing.Priority = Enum.AnimationPriority.Action
+    if tonumber(Smoothing) then playing:Play(Smoothing) else playing:Play() end
+    if tonumber(SPEED) then playing:AdjustSpeed(SPEED) else playing:AdjustSpeed(1) end
+    if tonumber(Time) then playing.TimePosition = Time end
+    animation:Destroy()
+end
+
+function AnimStop(ID, SPEED)
+    for i,v in pairs(OWNER.Character:WaitForChild("Humanoid"):GetPlayingAnimationTracks()) do
+        if (v.Animation.AnimationId:match("rbxassetid://"..ID)) then
+            if tonumber(SPEED) then v:Stop(SPEED) else v:Stop() end
+        end 
+    end
+end
+
+function Play(ID)
+    local Tool = nil
+    if OWNER.Character:FindFirstChildWhichIsA("Tool") then
+        Tool = OWNER.Character:FindFirstChildWhichIsA("Tool")
+        OWNER.Character:FindFirstChildWhichIsA("Tool").Parent = OWNER.Backpack
+    end
+    OWNER.Backpack["[Phone]"].Parent = OWNER.Character
+    game:GetService("ReplicatedStorage").MainEvent:FireServer("RingTone",ID)
+    OWNER.Character["[Phone]"].Parent = OWNER.Backpack
+    if Tool ~= true then
+        if Tool then Tool.Parent = OWNER.Character end
+    end
+end
+
+function MoveTo(X,Y,Z)
+    OWNER.Character.HumanoidRootPart.CFrame = OWNER.Character.HumanoidRootPart.CFrame*CFrame.new(X,Y,Z)
+end
+
+-- Create UI Tab
+local voiceTab = api:GetTab("misc") or api:AddTab("misc")
+
+-- Keybind for timestop effect
+table.insert(connections, game.Players.LocalPlayer:GetMouse().KeyDown:connect(function(key)
+    if key == 'z' then
+        Play(8036843509)
+        game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame = game.Players.LocalPlayer.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -30)
+        TweenService:Create(workspace.CurrentCamera, TweenInfo.new(0.5), {FieldOfView = 85}):Play()
+        TweenService:Create(game:GetService("Lighting").ColorCorrection, TweenInfo.new(0.8), {Saturation = -1}):Play()
+        local blur = Instance.new("BlurEffect", game:GetService("Lighting"))
+        TweenService:Create(blur, TweenInfo.new(0.8), {Size = 10}):Play()
+        wait(0.5)
+        TweenService:Create(workspace.CurrentCamera, TweenInfo.new(0.5), {FieldOfView = 70}):Play()
+        game:GetService("Lighting").ColorCorrection.TintColor = Color3.fromRGB(250, 250, 250)
+        TweenService:Create(blur, TweenInfo.new(0.8), {Size = 0}):Play()
+        wait(0.5)
+        TweenService:Create(game:GetService("Lighting").ColorCorrection, TweenInfo.new(0.8), {Saturation = 0}):Play()
+    end    
+end))
+
+-- JOTARO Section
+local jotaro = voiceTab:AddLeftGroupbox("jotaro")
+jotaro:AddLabel("Summon Voicelines")
+jotaro:AddButton("Star Platinum : OverHeaven", function()
+    api:chat("Star Platinum : OverHeaven")
+    Play(5684695930)
+end)
+jotaro:AddButton("Star Platinum, Za Warudo!", function()
+    api:chat("Star Platinum, Za Warudo!")
+    Play(5736107502)
+end)
+jotaro:AddButton("Star Platinum!", function()
+    api:chat("Star Platinum!")
+    Play(2554017604)
+end)
+
+jotaro:AddLabel("Jotaro Speaking")
+jotaro:AddButton("Yare Yare Daze...", function()
+    api:chat("Yare Yare Daze...")
+    Play(6670645219)
+end)
+jotaro:AddButton("Timestop", function()
+    api:chat("...")
+    Play(3101648169)
+end)
+jotaro:AddButton("Yare Yare..", function()
+    api:chat("Yare Yare..")
+    Play(8883559770)
+end)
+jotaro:AddButton("Yare Yare...", function()
+    api:chat("Yare Yare...")
+    Play(8657023668)
+end)
+jotaro:AddButton("Hm.", function()
+    api:chat("Hm.")
+    Play(8404016542)
+end)
+jotaro:AddButton("Hm. Not bad.", function()
+    api:chat("Hm. Not bad.")
+    Play(4894428927)
+end)
+jotaro:AddButton("Hey, what do you mean.", function()
+    api:chat("Hey, what do you mean.")
+    Play(8322982206)
+end)
+jotaro:AddButton("What's wrong?", function()
+    api:chat("What's wrong?")
+    Play(8600140455)
+end)
+jotaro:AddButton("Nice, Nice..", function()
+    api:chat("Nice, Nice..")
+    Play(8825592240)
+end)
+jotaro:AddButton("Ally or enemy?", function()
+    api:chat("Ally or enemy? It's your choice.")
+    Play(8825179323)
+end)
+jotaro:AddButton("Why did you call me Jotaro?", function()
+    api:chat("Why did you just call me Jotaro?")
+    Play(8322803654)
+end)
+jotaro:AddButton("Do you want a fight?", function()
+    api:chat("Do you want a fight? I'll give you a fight.")
+    Play(5111658124)
+end)
+jotaro:AddButton("Shut up! Pain woman!", function()
+    api:chat("Shut up! Don't be such a pain, woman!")
+    Play(6066726827)
+end)
+jotaro:AddButton("Time is now soon to flow", function()
+    api:chat("Time is now soon to flow...!")
+    Play(6769327870)
+end)
+jotaro:AddButton("DIO!", function()
+    api:chat("DIO!")
+    Play(8366433287)
+end)
+jotaro:AddButton("I'll be the judge!", function()
+    api:chat("I'll be the judge!")
+    Play(5344619446)
+end)
+jotaro:AddButton("You Will Definitely Pay!", function()
+    api:chat("You Will Definitely Pay!")
+    Play(4903895449)
+end)
+jotaro:AddButton("ORA ORA ORA!", function()
+    api:chat("ORA ORA ORA ORA ORA ORA ORA ORAA")
+    Play(6678126154)
+end)
+jotaro:AddButton("I Held Back..", function()
+    api:chat("I Held Back..")
+    Play(5261021079)
+end)
+jotaro:AddButton("Shut up!", function()
+    api:chat("Shut up!")
+    Play(8769065286)
+end)
+jotaro:AddButton("Huh!?!?", function()
+    api:chat("Huh!?!?")
+    Play(8366720886)
+end)
+
+-- DIO Section
+local dio = voiceTab:AddRightGroupbox("dio")
+dio:AddLabel("Stand Related")
+dio:AddButton("ZA WARUDO : OVER HEAVEN", function()
+    api:chat("ZA WARUDO : OVER HEAVEN")
+    Play(5170158077)
+end)
+dio:AddButton("Unleash Stand Power!", function()
+    api:chat("Time to unleash all of my Stand Power!")
+    Play(6945516323)
+end)
+dio:AddButton("MUDA MUDA MUDA!", function()
+    api:chat("MUDA MUDA MUDA MUDA MUDA MUDA MUDAA")
+    Play(4968518358)
+end)
+dio:AddButton("Time Stop!", function()
+    api:chat("ZA WARUDO:ova heaven!")
+    Play(6889737999)
+end)
+
+dio:AddLabel("Talk")
+dio:AddButton("Okay, okay...", function()
+    api:chat("Okay, okay...")
+    Play(6181723481)
+end)
+dio:AddButton("You're watching me?!", function()
+    api:chat("You're watching me?!")
+    Play(5601795198)
+end)
+dio:AddButton("I shall give you a chance", function()
+    api:chat("Ha Ha Ha Ha Ha...")
+    Play(5966580649)
+    wait(2)
+    api:chat("I shall give you a chance.")
+end)
+dio:AddButton("It's too late!", function()
+    api:chat("it's too late! You cannot escape!")
+    Play(6520552209)
+end)
+dio:AddButton("This Is Reality!", function()
+    api:chat("This Is Reality!")
+    Play(3516209683)
+end)
+dio:AddButton("Oh? Approaching me?", function()
+    api:chat("Oh? You're approaching me?")
+    Play(5808893495)
+end)
+dio:AddButton("Only Dio!", function()
+    api:chat("When Time is Stopped, There is Only Dio!")
+    Play(6964764259)
+end)
+dio:AddButton("Reality bend", function()
+    api:chat("Reality Bend To My Will.")
+    Play(3520725457)
+end)
+dio:AddButton("Sicko mode!", function()
+    api:chat("Time to go sicko mode!")
+    Play(4580052459)
+end)
+dio:AddButton("No one can destroy", function()
+    api:chat("No One Can Destroy My Reality.")
+    Play(3520733618)
+end)
+dio:AddButton("Path to heaven", function()
+    api:chat("This Is The Path To Heaven.")
+    Play(3520741614)
+end)
+dio:AddButton("I can still stop time!", function()
+    api:chat("I can still feel the power, I can still stop time!")
+    Play(6078926611)
+end)
+dio:AddButton("What?!", function()
+    api:chat("What?!")
+    Play(5572894087)
+end)
+dio:AddButton("You have abilities...", function()
+    api:chat("I heard that you have abilities...")
+    Play(6556675000)
+end)
+dio:AddButton("I can't move!", function()
+    api:chat("- I- Impossible... I- I can't move!")
+    Play(6946266008)
+end)
+
+dio:AddLabel("Insult")
+dio:AddButton("You fool!", function()
+    api:chat("Did you really think you could stand up to me? You fool!")
+    Play(5239735970)
+end)
+dio:AddButton("Defeat me?!", function()
+    api:chat("you thought you would be able to defeat me?!")
+    Play(2553966123)
+end)
+dio:AddButton("Resist my reality?!", function()
+    api:chat("You Dare To Resist My Reality?!")
+    Play(3516206013)
+end)
+dio:AddButton("Fun begins!", function()
+    api:chat("This is where the fun begins!")
+    Play(4820691231)
+end)
+dio:AddButton("Oblivion of Death!", function()
+    api:chat("Behold The Oblivion of Death!")
+    Play(2553976974)
+end)
+dio:AddButton("Smash you flat!", function()
+    api:chat("ill punch you flat!")
+    Play(4580050441)
+end)
+dio:AddButton("I shall rule you!", function()
+    api:chat("You puny humans, I shall rule you all!")
+    Play(6177205434)
+end)
+dio:AddButton("You're finished...", function()
+    api:chat("You're finished...")
+    Play(5479645747)
+end)
+dio:AddButton("Weakling!", function()
+    api:chat("Weakling, weakling!")
+    Play(6924545163)
+end)
+dio:AddButton("Garbage.", function()
+    api:chat("Garbage.")
+    Play(2553924562)
+end)
+dio:AddButton("You Fool!", function()
+    api:chat("You Fool!")
+    Play(2554775814)
+end)
+dio:AddButton("Pathetic..", function()
+    api:chat("Pathetic.. Pathetic..")
+    Play(4580051622)
+end)
+dio:AddButton("This is the end!", function()
+    api:chat("This Is The End!")
+    Play(2558554898)
+end)
+dio:AddButton("Weak!", function()
+    api:chat("Weak!")
+    Play(4148531112)
+end)
+dio:AddButton("You're trembling", function()
+    api:chat("whats wrong? you're trembling.")
+    Play(5758386131)
+end)
+dio:AddButton("Dio Laugh", function()
+    api:chat("HaHaHa...")
+    Play(5942376885)
+end)
+dio:AddButton("So weak...", function()
+    api:chat("So weak, so weak, so weak.")
+    Play(9088585474)
+end)
+
+-- DIEGO Section
+local diego = voiceTab:AddLeftGroupbox("diego brando")
+diego:AddButton("Time Resumes!", function()
+    api:chat("Time Resumes")
+    Play(3084539117)
+end)
+diego:AddButton("WRYYYYYY!", function()
+    api:chat("WRYYYYYYYYYYYAAAAAAAH!")
+    Play(3084528387)
+end)
+diego:AddButton("USHAAAAA!", function()
+    api:chat("USHAAAAAAAAAAA!")
+    Play(3084502155)
+end)
+diego:AddButton("Za Warudo! Time Resumes!", function()
+    api:chat("Za Warudo! Time Resumes!")
+    Play(3084495179)
+end)
+
+-- DIAVOLO Section
+local diavolo = voiceTab:AddRightGroupbox("diavolo")
+diavolo:AddButton("King Crimson's ability", function()
+    api:chat("This is king Crimson's ability")
+    Play(3373967354)
+end)
+diavolo:AddButton("King Crimson", function()
+    api:chat("King Crimson!")
+    Play(3373956700)
+end)
+diavolo:AddButton("Take This!", function()
+    api:chat("Take This!")
+    Play(3373975760)
+end)
+diavolo:AddButton("This Is A Test...", function()
+    api:chat("This Is A Test...")
+    Play(3374531743)
+end)
+diavolo:AddButton("You Vile Pukes!", function()
+    api:chat("You Vile Pukes!")
+    Play(6120821768)
+end)
+diavolo:AddButton("I will be king!", function()
+    api:chat("I, Diavolo. Will be king!")
+    Play(5278196952)
+end)
+diavolo:AddButton("A person grows once...", function()
+    api:chat("A person grows once...")
+    Play(6665063219)
+end)
+diavolo:AddButton("What just hit you was ME!", function()
+    api:chat("What you Just saw, What just hit you, was ME!")
+    Play(5258899114)
+end)
+
+-- PUCCI Section
+local pucci = voiceTab:AddLeftGroupbox("pucci")
+pucci:AddButton("Realize Insignificance", function()
+    api:chat("Realize Your Insignificance")
+    Play(8686937892)
+end)
+pucci:AddButton("Not bad", function()
+    api:chat("not bad")
+    Play(8686886507)
+end)
+pucci:AddButton("Made in Heaven", function()
+    Play(5059139543)
+end)
+pucci:AddButton("MADE IN HEAVEN SUMMON", function()
+    api:chat("made in heaven")
+    Play(8608569869)
+end)
+pucci:AddButton("Time Acceleration", function()
+    api:chat("time  aceleration!")
+    Play(7204917617)
+    wait(5)
+    Play(8968843545)
+    
+    local speeds = {10, 30, 70, 100, 150, 200, 300, 400, 500, 700, 40}
+    for i, speed in ipairs(speeds) do
+        wait(i <= 6 and 2 or 1)
+        _G.WS = tostring(speed)
+        local Humanoid = game:GetService("Players").LocalPlayer.Character.Humanoid
+        Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+            Humanoid.WalkSpeed = _G.WS
+        end)
+        Humanoid.WalkSpeed = _G.WS
+        if speed ~= 40 then Play(8968843545) end
+    end
+end)
+pucci:AddButton("Gravity shift", function()
+    api:chat("Gravity shift !")
+    Play(4907091810)
+end)
+pucci:AddButton("C-Moon", function()
+    api:chat("C moon!")
+    Play(8258958078)
+end)
+pucci:AddButton("That's the spot", function()
+    api:chat("thats the spot, i can feel it!")
+    Play(9089878503)
+end)
+pucci:AddButton("This is made in heaven", function()
+    api:chat("This is made in heaven!")
+    Play(4650379787)
+end)
+pucci:AddButton("Counter", function()
+    api:chat("1")
+    Play(4467794083)
+    
+    local moves = {
+        {0, 0, -15}, {10, 0, 0}, {10, 0, -15}, {4, 0, -4}, {-15, 0, 0},
+        {0, 0, -15}, {-15, 0, 0}, {0, 0, -15}, {4, 0, -4}, {4, 0, -4}
+    }
+    
+    for i = 2, 16 do
+        wait(1)
+        api:chat(tostring(i))
+        if i <= 11 then
+            MoveTo(moves[i-1][1], moves[i-1][2], moves[i-1][3])
+        else
+            MoveTo(4, 0, -4)
+            MoveTo(0, 0, -15)
+            MoveTo(-15, 0, 0)
+        end
+    end
+end)
+pucci:AddButton("No Pity At All..", function()
+    api:chat("But For You, I Feel No Pity At All..")
+    Play(6678126154)
+end)
+pucci:AddButton("Eyes of Heaven", function()
+    api:chat("eyes of heaven")
+    Play(6678126154)
+end)
+
+-- SONGS Section
+local songs = voiceTab:AddRightGroupbox("songs")
+songs:AddButton("Taco", function() Play(142376088) end)
+songs:AddButton("Roblos", function() Play(6724541195) end)
+songs:AddButton("Samsung", function() Play(6879335951) end)
+songs:AddButton("Ripper", function() Play(7807987190) end)
+songs:AddButton("Anthem", function() Play(1837477793) end)
+songs:AddButton("Emotional", function() Play(8388105535) end)
+songs:AddButton("Vine Boom", function() Play(5178876770) end)
+songs:AddButton("Obama", function() Play(5216738441) end)
+songs:AddButton("Russia", function() Play(2618158728) end)
+songs:AddButton("Window", function() Play(1107208252) end)
+
+-- EXTRA Section  
+local extra = voiceTab:AddLeftGroupbox("extra")
+extra:AddLabel("Goku Mode")
+extra:AddButton("Hey! Its Me Goku", function()
+    api:chat("Hey! Its Me Goku")
+    Play(5612259294)
+end)
+extra:AddButton("Ultra Instinct Theme", function()
+    api:chat("...")
+    Play(6427919074)
+end)
+extra:AddButton("Kaioken! 10X!", function()
+    api:chat("Kaioken! 10X!")
+    Play(1574062497)
+end)
+extra:AddButton("Get Ready!", function()
+    api:chat("Get Ready, For The Real Deal!")
+    Play(3993574860)
+end)
+extra:AddButton("RAHHHH!", function()
+    api:chat("RAHHHH.. RAHHHHHHHHHHHHHHHH!!")
+    Play(2661734130)
+end)
+extra:AddButton("HEEEHHH AHHH!", function()
+    api:chat("HEEEEEEEEEEEEEEEEEEEEEHHHHHHH AHHH!!!")
+    Play(2659098182)
+end)
+extra:AddButton("RAHHGGGHH!", function()
+    api:chat("RAHHHHHGGGGHHHHHHHHHHHHHH!!!!")
+    Play(2659098182)
+end)
+
+extra:AddLabel("Vegeta Mode")
+extra:AddButton("FINAL FLASH!", function()
+    api:chat("FINAL FLASH!")
+    Play(950551676)
+end)
+
+extra:AddLabel("Goku Black Mode")
+extra:AddButton("Vision For The World!", function()
+    api:chat("My Vision For The World Shall Be Realized!")
+    Play(966261603)
+end)
+extra:AddButton("You Will Kneel!", function()
+    api:chat("You Will Kneel Before Me!")
+    Play(966268002)
+end)
+extra:AddButton("Feel The Fury!", function()
+    api:chat("Feel The Fury Of A God!")
+    Play(966264954)
+end)
+extra:AddButton("Defy A God!", function()
+    api:chat("How Dare You, Defy A God!")
+    Play(966270845)
+end)
+extra:AddButton("You're Pointless!", function()
+    api:chat("The Peaful World Has No Need For Humans, Your Pointless!")
+    Play(966269704)
+end)
+extra:AddButton("Don't Keep Me Waiting!", function()
+    api:chat("Don't You Dare Keep Me Waiting!")
+    Play(966262774)
+end)
+
+-- EMOTES Section
+local emotes = voiceTab:AddRightGroupbox("emotes")
+emotes:AddButton("HEHEHAW", function() Play(8156780600) end)
+emotes:AddButton("Let's go", function() Play(3174077614) end)
+emotes:AddButton("Booty", function() Play(6816058751) end)
+emotes:AddButton("Laugh", function()
+    Play(374106817)
+    api:chat("😂")
+    AnimPlay(507770818)
+    wait(3)
+    AnimStop(507770818)
+end)
+emotes:AddButton("Laugh2", function()
+    Play(8449305114)
+    api:chat("😂")
+    AnimPlay(507770818)
+    wait(3)
+    AnimStop(507770818)
+end)
+emotes:AddButton("Angry", function()
+    Play(154157312)
+    api:chat("😡")
+end)
+emotes:AddButton("Sleep", function()
+    Play(8227660256)
+    api:chat("😴")
+end)
+emotes:AddButton("Cry", function() Play(719695310) end)
+emotes:AddButton("Vine Boom", function()
+    Play(9062874339)
+    api:chat("😳")
+end)
+emotes:AddButton("More Vine Boom", function()
+    Play(9060808331)
+    api:chat("😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳😳")
+end)
+emotes:AddButton("Bruh", function() Play(6349641063) end)
+emotes:AddButton("Toyota", function()
+    Play(6349641063)
+    wait(0.5) api:chat("Toyota")
+    wait(1.8) api:chat("Toyota")
+    wait(1.9) api:chat("Toyota")
+    wait(1.9) api:chat("Toyota")
+end)
+emotes:AddButton("Cringe", function()
+    Play(7198103956)
+    api:chat("Oh") wait(0.5)
+    api:chat("Noo") wait(0.7)
+    api:chat("Kringee")
+end)
+emotes:AddButton("Emotional Damage", function()
+    Play(9083355768)
+    wait(0.5) api:chat("Emotional")
+    wait(1) api:chat("Damage")
+end)
+emotes:AddButton("Xmas Song", function() Play(1844744453) end)
+emotes:AddButton("ALLUH AKBAR", function() Play(7473232658) end)
+emotes:AddButton("Racist", function() Play(7535788516) end)
+
+-- MISC Section
+local misc = voiceTab:AddLeftGroupbox("misc")
+misc:AddButton("JOJO Animation", function()
+    local Animate = game.Players.LocalPlayer.Character.Animate
+    Animate.idle.Animation1.AnimationId = "http://www.roblox.com/asset/?id=1149612882"
+    Animate.idle.Animation2.AnimationId = "http://www.roblox.com/asset/?id=1149612882"
+    Animate.run.RunAnim.AnimationId = "rbxassetid://1150967949"
+    Animate.jump.JumpAnim.AnimationId = "http://www.roblox.com/asset/?id=1148863382"
+    Animate.walk.WalkAnim.AnimationId = "rbxassetid://657552124"
+    Animate.climb.ClimbAnim.AnimationId = "rbxassetid://658360781"
+    Animate.fall.FallAnim.AnimationId = "rbxassetid://1148863382"
+    Animate.swim.Swim.AnimationId = "rbxassetid://657560551"
+    Animate.swimidle.SwimIdle.AnimationId = "rbxassetid://657557095"
+    game.Players.LocalPlayer.Character.Humanoid.Jump = false
+end)
+
+misc:AddButton("Fly [X]", function()
+    local L_143_ = game.Players.LocalPlayer
+    local L_144_ = L_143_:GetMouse()
+    localplayer = L_143_
+    if workspace:FindFirstChild("Core") then workspace.Core:Destroy() end
+    local L_145_ = Instance.new("Part")
+    L_145_.Name = "Core"
+    L_145_.Size = Vector3.new(0.05, 0.05, 0.05)
+    spawn(function()
+        L_145_.Parent = workspace
+        local L_152_ = Instance.new("Weld", L_145_)
+        L_152_.Part0 = L_145_
+        L_152_.Part1 = localplayer.Character.LowerTorso
+        L_152_.C0 = CFrame.new(0, 0, 0)
+    end)
+    workspace:WaitForChild("Core")
+    local L_146_ = workspace.Core
+    flying = true
+    local L_147_ = 25
+    local L_148_ = {a = false, d = false, w = false, s = false}
+    local L_149_, L_150_
+    local function L_151_func()
+        local L_153_ = Instance.new("BodyPosition", L_146_)
+        local L_154_ = Instance.new("BodyGyro", L_146_)
+        L_153_.Name = "EPIXPOS"
+        L_153_.maxForce = Vector3.new(math.huge, math.huge, math.huge)
+        L_153_.position = L_146_.Position
+        L_154_.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+        L_154_.cframe = L_146_.CFrame
+        repeat
+            wait()
+            localplayer.Character.Humanoid.PlatformStand = true
+            local L_155_ = L_154_.cframe - L_154_.cframe.p + L_153_.position
+            if not L_148_.w and not L_148_.s and not L_148_.a and not L_148_.d then L_147_ = 25 end
+            if L_148_.w then L_155_ = L_155_ + workspace.CurrentCamera.CoordinateFrame.lookVector * L_147_; L_147_ = L_147_ + 0 end
+            if L_148_.s then L_155_ = L_155_ - workspace.CurrentCamera.CoordinateFrame.lookVector * L_147_; L_147_ = L_147_ + 0 end
+            if L_148_.d then L_155_ = L_155_ * CFrame.new(L_147_, 0, 0); L_147_ = L_147_ + 0 end
+            if L_148_.a then L_155_ = L_155_ * CFrame.new(-L_147_, 0, 0); L_147_ = L_147_ + 0 end
+            if L_147_ > 10 then L_147_ = 25 end
+            L_153_.position = L_155_.p
+            if L_148_.w then L_154_.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(-math.rad(L_147_ * 0), 0, 0)
+            elseif L_148_.s then L_154_.cframe = workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(math.rad(L_147_ * 0), 0, 0)
+            else L_154_.cframe = workspace.CurrentCamera.CoordinateFrame end
+        until flying == false
+        if L_154_ then L_154_:Destroy() end
+        if L_153_ then L_153_:Destroy() end
+        flying = false
+        localplayer.Character.Humanoid.PlatformStand = false
+        L_147_ = 25
+    end
+    L_149_ = L_144_.KeyDown:connect(function(L_156_arg0)
+        if not L_146_ or not L_146_.Parent then flying = false; L_149_:disconnect(); L_150_:disconnect(); return end
+        if L_156_arg0 == "w" then L_148_.w = true
+        elseif L_156_arg0 == "s" then L_148_.s = true
+        elseif L_156_arg0 == "a" then L_148_.a = true
+        elseif L_156_arg0 == "d" then L_148_.d = true
+        elseif L_156_arg0 == "x" then
+            if flying == true then flying = false else flying = true; L_151_func() end
+        end
+    end)
+    L_150_ = L_144_.KeyUp:connect(function(L_157_arg0)
+        if L_157_arg0 == "w" then L_148_.w = false
+        elseif L_157_arg0 == "s" then L_148_.s = false
+        elseif L_157_arg0 == "a" then L_148_.a = false
+        elseif L_157_arg0 == "d" then L_148_.d = false end
+    end)
+    L_151_func()
+end)
+
+-- CREDITS Section
+local credits = voiceTab:AddRightGroupbox("credits")
+credits:AddLabel("over heaven👑⭐")
+credits:AddLabel("chips#7716")
+credits:AddLabel("@pqnd4. - methods & voicelines")
+credits:AddLabel("ticxyylolz#9164 - audio fix")
+credits:AddLabel("heavenascensionjotaro - sources")
+credits:AddLabel("Converted to Unnamed by Hayden")
+credits:AddLabel("Press Z for timestop effect")
+
+api:notify("Anime Voicelines loaded!", 3)

@@ -1,0 +1,154 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CurrentSkin = "Default"
+local AutoSkinEnabled = false
+local OverlayModel = nil
+
+-- Wait for API
+local api = nil
+for i = 1, 20 do
+    api = _G.api
+    if api then break end
+    task.wait(0.5)
+end
+
+if not api then
+    error("API not loaded")
+    return
+end
+
+api:SetLuaName("GunChanger")
+
+-- Get skins
+local function GetAvailableSkins()
+    local skinList = {}
+    local gunModels = ReplicatedStorage:FindFirstChild("SkinModules")
+    if gunModels then
+        gunModels = gunModels:FindFirstChild("GunModels")
+        if gunModels then
+            for _, model in pairs(gunModels:GetChildren()) do
+                table.insert(skinList, model.Name)
+            end
+        end
+    end
+    table.sort(skinList)
+    return skinList
+end
+
+local function GetSkinModel(skinName)
+    local gunModels = ReplicatedStorage:FindFirstChild("SkinModules")
+    if not gunModels then return nil end
+    gunModels = gunModels:FindFirstChild("GunModels")
+    if not gunModels then return nil end
+    return gunModels:FindFirstChild(skinName)
+end
+
+-- Apply skin
+local function ApplySkin(tool, skinName)
+    if not tool or tool.Name ~= "Rifle" then return end
+    local handle = tool:FindFirstChild("Handle")
+    if not handle then return end
+    
+    local skinModel = GetSkinModel(skinName)
+    if not skinModel then return end
+    
+    if OverlayModel then
+        OverlayModel:Destroy()
+        OverlayModel = nil
+    end
+    
+    local clonedModel = skinModel:Clone()
+    local modelHandle = clonedModel:FindFirstChild("Handle") or clonedModel:FindFirstChildWhichIsA("BasePart")
+    if not modelHandle then
+        clonedModel:Destroy()
+        return
+    end
+    
+    modelHandle.CanCollide = false
+    
+    local weld = Instance.new("WeldConstraint")
+    weld.Part0 = handle
+    weld.Part1 = modelHandle
+    weld.Parent = modelHandle
+    
+    clonedModel.Parent = tool
+    handle.Transparency = 1
+    OverlayModel = clonedModel
+    
+    api:Notify("Applied: " .. skinName, 2)
+end
+
+-- Apply current
+local function ApplyCurrentSkin()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local tool = char:FindFirstChild("Rifle")
+    if not tool then return end
+    ApplySkin(tool, CurrentSkin)
+end
+
+-- Auto skin
+local function EnableAutoSkin()
+    if AutoSkinEnabled then return end
+    AutoSkinEnabled = true
+    
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") and child.Name == "Rifle" then
+            task.wait(0.05)
+            ApplySkin(child, CurrentSkin)
+        end
+    end)
+    
+    LocalPlayer.CharacterAdded:Connect(function(newChar)
+        task.wait(0.5)
+        local tool = newChar:FindFirstChild("Rifle")
+        if tool then
+            ApplySkin(tool, CurrentSkin)
+        end
+    end)
+end
+
+-- UI
+local tab = api:GetTab("visuals") or api:AddTab("visuals")
+local box = tab:AddLeftGroupbox("Skin Changer")
+
+local skins = GetAvailableSkins()
+
+box:AddDropdown("gun_skin", {
+    Text = "Gun Skin",
+    Values = skins,
+    Default = 1,
+    Callback = function(value)
+        CurrentSkin = value
+    end
+})
+
+box:AddButton({
+    Text = "Apply Skin",
+    Func = function()
+        ApplyCurrentSkin()
+    end
+})
+
+box:AddToggle("autoskin", {
+    Text = "Auto-Skin",
+    Default = false,
+    Callback = function(value)
+        if value then
+            EnableAutoSkin()
+        end
+    end
+})
+
+api:OnEvent("unload", function()
+    if OverlayModel then
+        OverlayModel:Destroy()
+    end
+end)
+
+api:Notify("Gun Changer loaded", 3)

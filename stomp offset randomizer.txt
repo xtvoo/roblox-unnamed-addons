@@ -1,0 +1,60 @@
+local api = getfenv().api
+if not api then return end
+
+api:set_lua_name("stomp_dual_ui")
+
+-- use existing flags from unamed-flags.txt
+local offset_flag = api:get_ui_object("ragebot_stomp_offset")
+local random_flag = api:get_ui_object("ragebot_stomp_random")
+local start_flag = api:get_ui_object("animation_player_start_position")
+local end_flag = api:get_ui_object("animation_player_end_position")
+
+if not offset_flag or not random_flag or not start_flag or not end_flag then
+    api:notify("stomp flags missing (check names/UI loaded)", 3)
+    return
+end
+
+-- live params
+local enabled_offset = true
+local enabled_random = true
+local enabled_start = true
+local enabled_end = true
+local speed_offset = 2.0
+local speed_random = 1.5
+local speed_start = 1.0
+local speed_end = 1.2
+
+api:notify("Dual stomp logic active", 2)
+
+local RunService = game:GetService("RunService")
+local t_offset, t_random, t_start, t_end = 0, 0, 0, 0
+
+api:add_connection(RunService.Heartbeat:Connect(function(dt)
+    if enabled_offset then
+        t_offset = t_offset + dt
+        local prog = 0.5 * (1 + math.sin(t_offset * speed_offset * math.pi * 2))
+        offset_flag:SetValue(2 + prog * 3) -- 2 ↔ 5
+    end
+
+    if enabled_random then
+        t_random = t_random + dt
+        local prog = 0.5 * (1 + math.sin(t_random * speed_random * math.pi * 2))
+        random_flag:SetValue(prog) -- 0 ↔ 1
+    end
+
+    if enabled_start then
+        t_start = t_start + dt
+        local prog = 0.5 * (1 + math.sin(t_start * speed_start * math.pi * 2))
+        start_flag:SetValue(prog * 4) -- 0 ↔ 4
+    end
+
+    if enabled_end then
+        t_end = t_end + dt
+        local prog = 0.5 * (1 + math.sin(t_end * speed_end * math.pi * 2))
+        end_flag:SetValue(prog * 14) -- 0 ↔ 10
+    end
+end))
+
+api:on_event("unload", function()
+    api:notify("stomp_dual_ui unloaded", 2)
+end)

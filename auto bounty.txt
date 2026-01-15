@@ -1,0 +1,56 @@
+-- Fixed: Correct API from full docs (no setluaname line 2 error)
+
+local tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local box = tab:AddLeftGroupbox("Auto Bounty")
+
+box:AddToggle("BountySilent", {
+    Text = "Silent Bounty KO",
+    Default = false,
+    Callback = function(value)
+        if value then
+            api.notify("Watching bounty KO...", 3)
+            
+            spawn(function()
+                repeat task.wait(0.2) until workspace:FindFirstChild("MAP")
+                
+                local posterText = workspace.MAP.BountyPosters.Poster.Texts.PlayerName.SurfaceGui.TextLabel
+                
+                local watchConn = api.addconnection(posterText:GetPropertyChangedSignal("Text"):Connect(function()
+                    local bountyName = posterText.Text
+                    if bountyName == "" or bountyName == game.Players.LocalPlayer.Name then return end
+                    
+                    local bountyPlr = game.Players:FindFirstChild(bountyName)
+                    if not bountyPlr then return end
+                    
+                    spawn(function()
+                        for i = 1, 50 do
+                            task.wait(0.2)
+                            local toggleObj = box:GetToggle("BountySilent")
+                            if not toggleObj or not toggleObj:GetValue() then break end
+                            
+                            local status = api.getstatuscache(bountyPlr)
+                            if status and status["K.O"] then
+                                local silentFOV = api.getuiobject("silentshowfov")
+                                if silentFOV then silentFOV:SetValue(true) end
+                                
+                                local silentPart = api.getuiobject("silentclosestpart")
+                                if silentPart then silentPart:SetValue("LowerTorso") end
+                                
+                                api.notify("Silent KO: " .. bountyName, 4)
+                                break
+                            end
+                        end
+                    end)
+                end))
+            end)
+            
+        else
+            local silentFOV = api.getuiobject("silentshowfov")
+            if silentFOV then silentFOV:SetValue(false) end
+            
+            api.notify("Silent off", 2)
+        end
+    end
+})
+
+api.notify("Bounty Silent ready", 3)

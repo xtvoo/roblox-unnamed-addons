@@ -1,0 +1,213 @@
+api:set_lua_name("script_detector")
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+local ScriptLocations = {
+    Juju = {
+        CFrame.new(-330.703278, 80.318558, -255.124191),
+        CFrame.new(-327.441803, 80.320694, -248.899017),
+        CFrame.new(-331.147003, 80.323120, -250.295502),
+        CFrame.new(-329.217712, 80.329323, -240.833298),
+        CFrame.new(-625.194458, 23.342058, -294.811646),
+        CFrame.new(-622.250488, 23.342054, -292.775330),
+    },
+}
+
+local LocationRadius = 15
+local MaxWindowAfterDeath = 80
+
+local playersData = {}
+
+local TargetCaches = {
+    ragebot = api:get_target_cache("ragebot"),
+    silent = api:get_target_cache("silent"),
+}
+
+local ScriptDetectorToggle
+local LastHitPlayer
+
+local function getCharacterRoot(player)
+    local cache = api:get_character_cache(player)
+    return cache and cache.PrimaryPart or nil
+end
+
+local function ensurePlayerData(player)
+    local data = playersData[player]
+    if not data then
+        data = {
+            lastDeath = 0,
+            visits = {},
+            detectedScripts = {},
+        }
+        playersData[player] = data
+    end
+    return data
+end
+
+local function markVisit(player, scriptName, index)
+    local data = ensurePlayerData(player)
+    data.visits[scriptName] = data.visits[scriptName] or {}
+    data.visits[scriptName][index] = true
+end
+
+local function hasVisitedAll(player, scriptName)
+    local data = playersData[player]
+    local locs = ScriptLocations[scriptName]
+    if not data or not locs then
+        return false
+    end
+    local visits = data.visits[scriptName]
+    if not visits then
+        return false
+    end
+    for i = 1, #locs do
+        if not visits[i] then
+            return false
+        end
+    end
+    return true
+end
+
+local function withinTimeWindow(player)
+    local data = playersData[player]
+    if not data then
+        return false
+    end
+    if data.lastDeath == 0 then
+        return true
+    end
+    return (tick() - data.lastDeath) <= MaxWindowAfterDeath
+end
+
+local function isPriorityTarget(player)
+    local rageTarget = TargetCaches.ragebot.player
+    if rageTarget and rageTarget == player then
+        return true
+    end
+    local silentTarget = TargetCaches.silent.player
+    if silentTarget and silentTarget == player then
+        return true
+    end
+    return false
+end
+
+local function notifyDetected(player, scriptName, isPriority)
+    local label = scriptName:upper()
+    local msg
+    if isPriority then
+        msg = "[Script Detector] " .. player.Name .. " flagged on " .. label .. " (target)."
+    else
+        msg = "[Script Detector] " .. player.Name .. " flagged on " .. label .. "."
+    end
+    api:notify(msg, isPriority and 6 or 4)
+end
+
+do
+    local tabs = {
+        lua = api:AddTab("Script Detector"),
+    }
+
+    local groupbox = tabs.lua:AddLeftGroupbox("Main")
+    groupbox:AddToggle("script_detector_toggle", {
+        Text = "Enable Script Detector",
+        Default = false,
+    })
+end
+
+ScriptDetectorToggle = api:get_ui_object("script_detector_toggle")
+
+local function isEnabled()
+    if ScriptDetectorToggle == nil then
+        ScriptDetectorToggle = api:get_ui_object("script_detector_toggle")
+    end
+    if ScriptDetectorToggle then
+        local ok, value = pcall(function()
+            return ScriptDetectorToggle:GetValue()
+        end)
+        if ok and value ~= nil then
+            return value
+        end
+    end
+    return false
+end
+
+api:on_event("unload", function()
+    api:notify("[Script Detector] Unloaded.", 2)
+end)
+
+local function updateDeaths()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local cache = api:get_status_cache(plr)
+            if cache then
+                local data = ensurePlayerData(plr)
+                if (cache.Dead or cache.SDeath) and (tick() - data.lastDeath) > 2 then
+                    data.lastDeath = tick()
+                    data.visits = {}
+                end
+            end
+        end
+    end
+end
+
+api:add_connection(api:on_event("target_changed", function(_) end))
+
+api:add_connection(api:on_event("localplayer_hit_player", function(playerName)
+    local plr = Players:FindFirstChild(playerName)
+    if plr then
+        LastHitPlayer = plr
+    end
+end))
+
+local function isPriorityTargetExtended(player)
+    if isPriorityTarget(player) then
+        return true
+    end
+    return LastHitPlayer ~= nil and LastHitPlayer == player
+end
+
+local function onHeartbeat()
+    if not isEnabled() then
+        return
+    end
+
+    updateDeaths()
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            local root = getCharacterRoot(plr)
+            if root then
+                local pos = root.Position
+
+                for scriptName, locations in pairs(ScriptLocations) do
+                    for index, cf in ipairs(locations) do
+                        if (pos - cf.Position).Magnitude <= LocationRadius then
+                            markVisit(plr, scriptName, index)
+                        end
+                    end
+                end
+
+                local data = playersData[plr]
+                if data then
+                    for scriptName in pairs(ScriptLocations) do
+                        if not data.detectedScripts[scriptName] then
+                            if withinTimeWindow(plr) and hasVisitedAll(plr, scriptName) then
+                                local priority = isPriorityTargetExtended(plr)
+                                notifyDetected(plr, scriptName, priority)
+                                data.detectedScripts[scriptName] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+api:add_connection(RunService.Heartbeat:Connect(onHeartbeat))
+
+api:on_event("localplayer_spawned", function()
+    api:notify("[Script Detector] Loaded. Toggle: script_detector_toggle.", 4)
+end)

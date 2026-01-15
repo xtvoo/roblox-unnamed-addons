@@ -1,0 +1,423 @@
+-- Skin Scanner Script - COMPLETE FULL VERSION
+api:set_lua_name("skinscanner")
+
+api:on_event("unload", function()
+    api:notify("Skin Scanner unloaded", 2)
+end)
+
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Levenshtein Distance for spell-check/auto-correct
+local function LevenshteinDistance(s1, s2)
+    local len1, len2 = #s1, #s2
+    
+    if len1 == 0 then return len2 end
+    if len2 == 0 then return len1 end
+    
+    local matrix = {}
+    for i = 0, len1 do
+        matrix[i] = {[0] = i}
+    end
+    for j = 0, len2 do
+        matrix[0][j] = j
+    end
+    
+    for i = 1, len1 do
+        for j = 1, len2 do
+            local cost = (s1:sub(i, i) == s2:sub(j, j)) and 0 or 1
+            matrix[i][j] = math.min(
+                matrix[i-1][j] + 1,      -- deletion
+                matrix[i][j-1] + 1,      -- insertion
+                matrix[i-1][j-1] + cost  -- substitution
+            )
+        end
+    end
+    
+    return matrix[len1][len2]
+end
+
+-- Complete hardcoded skin database (fallback)
+local HARDCODED_SKINS = {
+    ["[Mask]"] = {"Shrimp", "Bandana Black", "Ski Mask II", "Bandana DH", "Ski Mask", "Ski Mask Saint", "Hockey", "Ski Mask X)", "Hockey DH", "Ski Mask Half Green", "Ski Mask Red", "Hockey DH"},
+    ["[AUG]"] = {"Jungle Blaster", "1984", "Battleworn Purple", "Black & White", "White Stripes", "Battleworn Red", "Battleworn Green", "Battleworn Pink", "Battleworn Orange", "Biohazard", "Rainbow", "Military", "Shadow", "Danger", "Gold Glory", "GPOII", "Venom", "Pink Fuchsia", "Matrix", "Battleworn Silver"},
+    ["[AR]"] = {"Jungle Blaster", "1984", "Battleworn Purple", "Battleworn Orange", "White Stripes", "Battleworn Green", "Battleworn Pink", "Battleworn Blue", "Biohazard", "Halloween", "Luck", "Battleworn Red", "Rainbow", "Gold Glory", "Venom", "Black & White", "Premium Yellow", "Emerald", "Red Tiger", "Future"},
+    ["[Silencer]"] = {"Jungle Blaster", "Mummy", "Battleworn Lilac", "1984", "Battleworn Purple", "Battleworn Orange", "White Stripes", "Tact", "Battleworn Green", "Battleworn Pink", "Danger", "Valentine", "Future", "Premium Red", "Black & White", "Icey", "Red Tiger", "Red Hot"},
+    ["[Revolver]"] = {"Jungle Blaster", "Galaxy", "Arcade", "Snow Wrap", "Red Hot", "White Stripes", "Icey", "Xmas25", "Mystical", "Gold Glory", "XMAS", "Electric", "Military", "Biohazard", "Battleworn Pink", "Future", "Battleworn Green", "CandyCane", "Black & White", "Battleworn Lilac", "Battleworn Purple", "Battleworn Yellowish", "Blossom", "Shadow", "Beary", "Undead", "Hoodmas", "Skull", "Emerald", "Metal", "Sushi", "Penguin", "Devil", "Wraith", "Cartoon", "Ice", "8-BIT", "Kingpin", "Butterfly", "Duck", "Ruby", "GPOII", "Danger", "Luck", "Valentine", "Soul", "Love", "SoulII", "Cat", "Kitty", "Toy", "Venom", "Red Death"},
+    ["[SilencerAR]"] = {"Jungle Blaster", "1984", "Battleworn Purple", "Biohazard", "Battleworn Orange", "Battleworn Red", "Battleworn Green", "Battleworn Pink", "Battleworn Blue", "White Stripes", "Patriot", "Red Death", "Danger", "Premium Yellow", "Glassy", "Gold Glory", "Red Tiger"},
+    ["[LMG]"] = {"Jungle Blaster", "Danger", "1984", "Battleworn Purple", "Battleworn Orange", "White Stripes", "Patriot", "Battleworn Green", "Battleworn Pink", "Battleworn Red", "Glassy", "Red Death", "Gold Glory", "Toy", "Pink Fuchsia", "Premium Red", "Premium Yellow", "Red Tiger", "Red Hot", "Candy", "Rainbow", "Matrix", "Icey"},
+    ["[Glock]"] = {"Jungle Blaster", "Snow Wrap", "Battleworn Lilac", "Red Death", "Battleworn Purple", "Battleworn Orange", "White Stripes", "Battleworn Green", "Battleworn Pink", "1984", "Danger", "Black & White", "Future", "Rainbow", "Glassy", "Electric", "Venom"},
+    ["[Double-Barrel SG]"] = {"Jungle Blaster", "Galaxy", "Arcade", "Snow Wrap", "Skull", "Blossom", "Hoodmas", "Xmas25", "Premium Yellow", "White Stripes", "Danger", "Stars", "Battleworn Pink", "GPOII", "Sushi", "Etheral", "Beary", "Kingpin", "XMAS24", "Battleworn Purple", "1984", "Shrimp", "Battleworn Silver", "Butterfly", "Battleworn Orange", "Flower", "Duck", "Battleworn Green", "Cartoon", "Ice", "Electric", "Patriot", "Red Death", "Black & White", "Inferno", "Ruby", "Candy", "8-BIT", "Love", "Soul", "SoulII", "Valentine", "Luck", "Military", "Unicorn", "Magma", "Matrix", "Glassy", "Portal", "Water", "Angry-Hero", "Red Hot", "Shadow", "Venom", "Golden Age", "Emerald", "Metal", "Bubu", "Aqua", "Wire", "Tact", "Red Skull", "Mystical", "Reptile", "Samurai", "Jellyfish", "Brainrot", "Pink Fuchsia", "Cat", "Kitty", "Shader"},
+    ["[Drum-Shotgun]"] = {"Jungle Blaster", "Purple Yellow Wrap", "1984", "Battleworn Red", "Battleworn Purple", "Light Camo", "Black White", "Battleworn Blue", "Battleworn Orange", "Battleworn Green", "Battleworn Pink", "Cat"},
+    ["[SMG]"] = {"Jungle Blaster", "Danger", "1984", "Battleworn Purple", "Battleworn Silver", "Battleworn Red", "White Stripes", "Battleworn Orange", "Battleworn Green", "Battleworn Pink", "Red Tiger", "Wire", "Tact", "Rainbow", "Future", "Biohazard", "Black & White", "Red Hot"},
+    ["[TacticalShotgun]"] = {"GPO-Magma", "Shadow", "Snow Wrap", "Tact", "Premium Yellow", "White Stripes", "Battleworn Pink", "Valentine", "Soul", "Red Death", "Cloud", "Galaxy", "1984", "Battleworn Orange", "Galactic", "Battleworn Red", "Battleworn Green", "Jungle Blaster", "Electric", "Danger", "Water", "Black & White", "Portal", "Halloween23", "Battleworn Purple", "Spooky", "Love", "Rainbow", "Sushi", "Brainrot", "Jellyfish", "Venom", "Patriot", "Beary", "Biohazard", "Hoodmas", "Icey", "Unicorn", "Future", "Premium Red", "Red Tiger"},
+    ["[AK47]"] = {"Jungle Blaster", "Glassy", "Kingpin", "1984", "Battleworn Red", "Battleworn Purple", "Icey", "XMAS24", "Battleworn Blue", "Battleworn Orange", "Battleworn Green", "Premium Red", "White Stripes", "Danger", "Black & White", "Rainbow", "Emerald", "Valentine", "Pink Fuchsia", "Red Hot"},
+    ["[Knife]"] = {"Popsicle", "Beary", "Kunai", "Frog", "Xmas25", "Purple Marker", "Sushi", "Portal", "Kingpin", "SoulII", "Pink", "Blue Marker", "XMAS24", "Kitchen", "Duck", "Mochi", "Heaven", "Skull", "Ice Sword", "Shrimp", "Cat", "Buster", "Screw Driver", "Metal", "Golden Age Tanto", "Love", "Runic", "Dual Bayonets", "Katar", "Blossom", "Pink Marker", "Green Marker", "RGB Butterfly", "Watermelon", "Cartoon", "GPO-Knife", "GingerBread", "Unicorn", "Cupid", "Hoodmas", "Wire", "Black Marker", "Love Kukri", "Etheral", "Orange Marker", "Shadow", "Red Tiger", "Bat Sharp", "Scissor", "Gothic", "Emerald-Bayonet", "Galactic", "Stars", "Aqua", "Banana", "Brainrot", "Candy", "CyanKarambit", "Dragon", "Emerald", "Iced Out", "Jellyfish", "Metal", "Nightmare", "Penguin Ice Cream", "Purple Dagger", "RGB Dual Bayonets", "RGB Karambit", "RoseKarambit", "Ruby Fan", "Samurai", "Shader", "Spooky", "Spatula", "Wraith"},
+    ["[Wallet]"] = {"Pink Purse", "Bitcoin", "Designer", "Pink Purse II", "Pig", "Credit Card", "Credit Card Pink", "Stacks", "Kin", "Designer Pink"},
+    ["[House]"] = {"Holiday Town", "Gingerbread House", "House 2", "Classic 1", "Villa Nova", "Garage Home", "Modern Town", "Modern", "Pizza Restaurant"},
+    ["[Vehicle]"] = {"Cyber", "Moped", "Unicorn", "Sedan", "Police", "Motorcycle", "Skull", "Blossom", "Beary", "Kart", "Golf Cart", "Dirt Bike", "Muscle B", "Muscle C", "Toy Tank", "ATV", "Delivery Car", "Delivery Moped", "Reindeer", "Nightmare", "TriWheel", "Beatle", "Ultra", "Cow", "SoulII", "Wraith", "Ribbon", "Jellyfish", "Samurai", "Duck"},
+    ["[Rifle]"] = {"Jungle Blaster", "Biohazard", "White Stripes", "1984", "Battleworn Red", "Glassy", "Danger", "Black & White", "Battleworn Orange", "Battleworn Green", "Future", "Battleworn Purple", "Venom", "Rainbow", "Shadow", "Icey", "Premium Yellow", "GPO-Light", "Valentine", "Red Hot", "Red Tiger", "Metal", "Battleworn Pink"},
+    ["[P90]"] = {"Jungle Blaster", "Matrix", "Valentine", "1984", "Battleworn Purple", "Black & White", "White Stripes", "Battleworn Green", "Battleworn Pink", "Red Tiger", "Shadow", "Rainbow", "Gold Glory", "Battleworn Red", "Battleworn Orange", "Red Death", "Icey", "Patriot", "Danger", "Future", "Premium Yellow", "Pink Fuchsia", "Biohazard"},
+    ["[Flamethrower]"] = {"Jungle Blaster", "Pink Fuchsia", "Doll", "8-BIT", "Battleworn Pink", "1984", "Cartoon", "Battleworn Purple", "Battleworn Silver", "Battleworn Orange", "White Stripes", "XMAS24", "Mystical", "Icey", "Red Tiger", "Duck", "Water", "Stars", "Battleworn Green", "Premium Red", "Shrimp", "Snow Wrap", "Penguin", "Gold Glory", "Etheral", "Danger", "Kitty", "Patriot"},
+    ["[RPG]"] = {"Jungle Blaster", "Danger", "Halloween23", "Battleworn Purple", "Ruby", "Biohazard", "White Stripes", "Battleworn Pink", "Soul", "1984", "Cake", "Battleworn Orange", "Battleworn Red", "8-BIT", "Battleworn Green", "Cartoon", "Mystical", "Future", "Red Hot", "Beary", "Duck", "Skull", "BrainrotShark", "Jellyfish", "Ribbon", "Cookie", "Icey", "Sushi", "Etheral", "Portal", "Toy", "Patriot", "Xmas25", "XMAS24", "Red Skull", "Red Tiger", "Valentine", "Rainbow", "Glassy", "Luck", "Metal", "GPOII", "Nightmare", "Cupid", "SoulII", "XMAS", "Kitty", "Love"},
+    ["[DrumGun]"] = {"Jungle Blaster", "Pink Fuchsia", "1984", "Battleworn Silver", "Battleworn Purple", "Battleworn Orange", "Battleworn Red", "White Stripes", "Black & White", "Battleworn Green", "Red Death", "Red Tiger", "Battleworn Pink", "Danger", "Matrix", "Icey", "Premium Red", "Rainbow", "Future", "Battleworn Blue"},
+    ["[Shotgun]"] = {"Jungle Blaster", "Snow Wrap", "1984", "Fish", "Battleworn Purple", "Battleworn Orange", "Battleworn Red", "White Stripes", "Future", "Battleworn Green", "Battleworn Pink", "Tact", "Shadow", "Hoodmas", "Rainbow", "Biohazard", "Kitty", "Glassy", "Matrix", "Red Skull", "Danger", "Inferno", "Jellyfish", "Brainrot", "Pink Fuchsia"},
+}
+
+-- Auto-populate skin database from game
+local SKIN_DATABASE = {}
+local CATEGORY_LIST = {}
+
+local function LoadSkinsFromGame()
+    local skinAssets = ReplicatedStorage:FindFirstChild("SkinAssets")
+    if not skinAssets then
+        print("WARNING: SkinAssets not found, using hardcoded database")
+        return false
+    end
+    
+    local skinScriptsStorage = skinAssets:FindFirstChild("SkinScriptsStorage")
+    if not skinScriptsStorage then
+        print("WARNING: SkinScriptsStorage not found, using hardcoded database")
+        return false
+    end
+    
+    print("=== LOADING SKINS FROM GAME ===")
+    
+    for _, categoryFolder in pairs(skinScriptsStorage:GetChildren()) do
+        if categoryFolder:IsA("Folder") then
+            local categoryName = categoryFolder.Name
+            
+            if string.sub(categoryName, 1, 1) == "[" then
+                SKIN_DATABASE[categoryName] = {}
+                table.insert(CATEGORY_LIST, categoryName)
+                
+                print("Category: " .. categoryName)
+                
+                for _, skinItem in pairs(categoryFolder:GetChildren()) do
+                    local skinName = skinItem.Name
+                    table.insert(SKIN_DATABASE[categoryName], skinName)
+                end
+                
+                table.sort(SKIN_DATABASE[categoryName])
+            end
+        end
+    end
+    
+    table.sort(CATEGORY_LIST)
+    
+    print("=== LOADED " .. #CATEGORY_LIST .. " CATEGORIES FROM GAME ===")
+    return #CATEGORY_LIST > 0
+end
+
+-- Try to load from game first
+local loadSuccess = LoadSkinsFromGame()
+
+-- If game loading failed, use hardcoded database
+if not loadSuccess or #CATEGORY_LIST == 0 then
+    print("=== USING HARDCODED SKIN DATABASE ===")
+    SKIN_DATABASE = HARDCODED_SKINS
+    for category, _ in pairs(HARDCODED_SKINS) do
+        table.insert(CATEGORY_LIST, category)
+    end
+    table.sort(CATEGORY_LIST)
+    api:notify("Using hardcoded skins database", 2)
+end
+
+-- Variables
+local SELECTED_CATEGORY = CATEGORY_LIST[1] or "[Knife]"
+local SELECTED_SKIN = (SKIN_DATABASE[SELECTED_CATEGORY] and SKIN_DATABASE[SELECTED_CATEGORY][1]) or ""
+
+-- Helper function to parse and check skins
+local function PlayerHasSkin(player, category, skinName)
+    local dataFolder = player:FindFirstChild("DataFolder")
+    if not dataFolder then return false, {}, 0 end
+    
+    local results = {
+        EquipSkins = 0,
+        WeaponSkins = 0,
+        Skins = 0
+    }
+    
+    local totalQuantity = 0
+    
+    local skinsValue = dataFolder:FindFirstChild("Skins")
+    if skinsValue and skinsValue:IsA("ValueBase") then
+        local success, skinData = pcall(function()
+            return HttpService:JSONDecode(skinsValue.Value)
+        end)
+        
+        if success and skinData then
+            if skinData[category] and skinData[category][skinName] then
+                local quantity = skinData[category][skinName]
+                if quantity >= 1 then
+                    results.Skins = quantity
+                    totalQuantity = totalQuantity + quantity
+                end
+            end
+        end
+    end
+    
+    local information = dataFolder:FindFirstChild("Information")
+    if information then
+        local equipSkins = information:FindFirstChild("EquipSkins")
+        if equipSkins and equipSkins:IsA("ValueBase") then
+            local success, equipData = pcall(function()
+                return HttpService:JSONDecode(equipSkins.Value)
+            end)
+            
+            if success and equipData then
+                if equipData[category] and equipData[category][skinName] then
+                    local quantity = equipData[category][skinName]
+                    if quantity >= 1 then
+                        results.EquipSkins = quantity
+                    end
+                end
+            end
+        end
+        
+        local weaponSkins = information:FindFirstChild("WeaponSkins")
+        if weaponSkins and weaponSkins:IsA("ValueBase") then
+            local success, weaponData = pcall(function()
+                return HttpService:JSONDecode(weaponSkins.Value)
+            end)
+            
+            if success and weaponData then
+                if weaponData[category] and weaponData[category][skinName] then
+                    local quantity = weaponData[category][skinName]
+                    if quantity >= 1 then
+                        results.WeaponSkins = quantity
+                    end
+                end
+            end
+        end
+    end
+    
+    local hasAnySkin = results.EquipSkins > 0 or results.WeaponSkins > 0 or results.Skins > 0
+    return hasAnySkin, results, totalQuantity
+end
+
+-- Create UI
+local ScannerTab = api:AddTab("Skin Scanner")
+local MainBox = ScannerTab:AddLeftGroupbox("Scanner Settings")
+local ResultBox = ScannerTab:AddRightGroupbox("Scan Results")
+
+MainBox:AddLabel("Weapon Skin Scanner")
+MainBox:AddLabel("Loaded " .. #CATEGORY_LIST .. " categories")
+MainBox:AddDivider()
+
+-- Weapon Category Dropdown
+local categoryDropdown = MainBox:AddDropdown("weapon_category", {
+    Values = CATEGORY_LIST,
+    Default = 1,
+    Multi = false,
+    Text = "Weapon Category",
+    Tooltip = "Select the weapon type",
+    Callback = function(value)
+        SELECTED_CATEGORY = value
+        
+        local skinDropdown = api:get_ui_object("skin_selection")
+        local availableSkins = SKIN_DATABASE[value] or {}
+        
+        skinDropdown:SetValues(availableSkins)
+        if #availableSkins > 0 then
+            skinDropdown:SetValue(availableSkins[1])
+            SELECTED_SKIN = availableSkins[1]
+        else
+            SELECTED_SKIN = ""
+        end
+        
+        api:notify("Category: " .. value .. " (" .. #availableSkins .. " skins)", 2)
+    end
+})
+
+-- Skin Selection Dropdown
+local initialSkins = SKIN_DATABASE[SELECTED_CATEGORY] or {}
+MainBox:AddDropdown("skin_selection", {
+    Values = initialSkins,
+    Default = 1,
+    Multi = false,
+    Text = "Select from list",
+    Tooltip = "Pick a skin from dropdown",
+    Callback = function(value)
+        SELECTED_SKIN = value
+        api:notify("Selected: " .. value, 1.5)
+    end
+})
+
+-- Search/Auto-correct input
+MainBox:AddInput("skin_search_input", {
+    Default = "",
+    Numeric = false,
+    Finished = false,
+    Text = "Or type to search",
+    Tooltip = "Type a skin name and it will auto-correct",
+    Placeholder = "Type 'gpo' or 'battleworn'...",
+    Callback = function(value)
+        if value == "" or value == " " then return end
+        
+        local searchTerm = value:lower()
+        local availableSkins = SKIN_DATABASE[SELECTED_CATEGORY] or {}
+        local closestMatch = nil
+        local closestDistance = math.huge
+        
+        -- First pass: exact match or contains substring
+        for _, skinName in ipairs(availableSkins) do
+            local skinLower = skinName:lower()
+            
+            -- Exact match (best)
+            if skinLower == searchTerm then
+                closestMatch = skinName
+                closestDistance = 0
+                break
+            end
+            
+            -- Contains substring
+            if string.find(skinLower, searchTerm, 1, true) then
+                local distance = math.abs(#skinLower - #searchTerm)
+                if distance < closestDistance then
+                    closestMatch = skinName
+                    closestDistance = distance
+                end
+            end
+        end
+        
+        -- Second pass: Levenshtein distance if no substring match
+        if not closestMatch or closestDistance > 0 then
+            for _, skinName in ipairs(availableSkins) do
+                local skinLower = skinName:lower()
+                local distance = LevenshteinDistance(searchTerm, skinLower)
+                
+                if distance < closestDistance then
+                    closestMatch = skinName
+                    closestDistance = distance
+                end
+            end
+        end
+        
+        if closestMatch then
+            SELECTED_SKIN = closestMatch
+            api:notify("Auto-corrected to: " .. closestMatch, 2)
+        else
+            api:notify("No skin found matching: " .. value, 3)
+        end
+    end
+})
+
+MainBox:AddDivider()
+
+-- Test button
+MainBox:AddButton({
+    Text = "Test: Check My Skins",
+    Func = function()
+        if SELECTED_SKIN == "" then
+            api:notify("No skin selected!", 2)
+            return
+        end
+        
+        local hasSkin, locations, totalQty = PlayerHasSkin(Players.LocalPlayer, SELECTED_CATEGORY, SELECTED_SKIN)
+        
+        if hasSkin then
+            local msg = "You own " .. SELECTED_SKIN .. ": "
+            local details = {}
+            if locations.Skins > 0 then table.insert(details, "Skins: " .. locations.Skins) end
+            if locations.EquipSkins > 0 then table.insert(details, "Equipped: " .. locations.EquipSkins) end
+            if locations.WeaponSkins > 0 then table.insert(details, "WeaponSkins: " .. locations.WeaponSkins) end
+            msg = msg .. table.concat(details, " | ")
+            api:notify(msg, 3)
+        else
+            api:notify("NO - You don't have " .. SELECTED_SKIN, 3)
+        end
+    end
+})
+
+MainBox:AddDivider()
+
+-- Scan button
+MainBox:AddButton({
+    Text = "Scan All Players",
+    Func = function()
+        if not SELECTED_SKIN or SELECTED_SKIN == "" then
+            api:notify("Please select a skin first!", 3)
+            return
+        end
+        
+        api:notify("Scanning for: " .. SELECTED_SKIN, 2)
+        
+        ResultBox = ScannerTab:AddRightGroupbox("Scan Results")
+        
+        local foundPlayers = {}
+        local skinLocations = {}
+        local skinQuantities = {}
+        
+        for _, player in pairs(Players:GetPlayers()) do
+            local hasSkin, locations, qty = PlayerHasSkin(player, SELECTED_CATEGORY, SELECTED_SKIN)
+            
+            if hasSkin then
+                table.insert(foundPlayers, player.Name)
+                skinLocations[player.Name] = locations
+                skinQuantities[player.Name] = qty
+            end
+        end
+        
+        ResultBox:AddLabel("═══════════════════════")
+        ResultBox:AddLabel("Search Results")
+        ResultBox:AddLabel("═══════════════════════")
+        ResultBox:AddLabel("Category: " .. SELECTED_CATEGORY)
+        ResultBox:AddLabel("Skin: " .. SELECTED_SKIN)
+        ResultBox:AddDivider()
+        
+        if #foundPlayers > 0 then
+            ResultBox:AddLabel("✓ Found in " .. #foundPlayers .. " player(s):")
+            ResultBox:AddDivider()
+            
+            for _, playerName in pairs(foundPlayers) do
+                ResultBox:AddLabel("━━━━━━━━━━━━━━━━━")
+                ResultBox:AddLabel("👤 " .. playerName)
+                
+                local locations = skinLocations[playerName]
+                local qty = skinQuantities[playerName]
+                
+                ResultBox:AddLabel("  Quantity: " .. qty)
+                
+                if locations.Skins > 0 then 
+                    ResultBox:AddLabel("  ✓ Skins (Owned): " .. locations.Skins)
+                end
+                if locations.EquipSkins > 0 then 
+                    ResultBox:AddLabel("  ✓ EquipSkins: " .. locations.EquipSkins)
+                end
+                if locations.WeaponSkins > 0 then 
+                    ResultBox:AddLabel("  ✓ WeaponSkins: " .. locations.WeaponSkins)
+                end
+            end
+            
+            ResultBox:AddDivider()
+            ResultBox:AddLabel("Total: " .. #foundPlayers .. " players")
+            api:notify("Found on " .. #foundPlayers .. " player(s)!", 3)
+        else
+            ResultBox:AddLabel("❌ NO RESULTS FOUND")
+            ResultBox:AddDivider()
+            ResultBox:AddLabel("No players have this skin")
+            ResultBox:AddDivider()
+            ResultBox:AddLabel("Scanned " .. #Players:GetPlayers() .. " players")
+            api:notify("No players found", 3)
+        end
+    end
+})
+
+-- Info box
+ResultBox:AddLabel("═══════════════════════")
+ResultBox:AddLabel("Skin Scanner v7.0")
+ResultBox:AddLabel("═══════════════════════")
+ResultBox:AddLabel("")
+ResultBox:AddLabel("✓ Auto-loads from game")
+ResultBox:AddLabel("✓ Auto-correct search")
+ResultBox:AddLabel("✓ Shows skin quantity")
+ResultBox:AddDivider()
+ResultBox:AddLabel("Features:")
+ResultBox:AddLabel("• " .. #CATEGORY_LIST .. " weapon categories")
+ResultBox:AddLabel("• Type to search & correct")
+ResultBox:AddLabel("• Scan all players")
+
+api:notify("Skin Scanner fully loaded!", 2)

@@ -1,0 +1,359 @@
+api:set_lua_name("sticky_glue")
+
+local Handler = loadstring(game:HttpGet("https://raw.githubusercontent.com/XK5NG/XK5NG.github.io/main/Handler"))()
+
+local Players = cloneref(game:GetService("Players"))
+local RunService = cloneref(game:GetService("RunService"))
+local LocalPlayer = Players.LocalPlayer
+
+local Tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+local Main_Tab = Tab:AddLeftGroupbox("Glue - Main")
+local Position_Tab = Tab:AddRightGroupbox("Glue - Pos")
+local Rotation_Tab = Tab:AddLeftGroupbox("Glue - Rot")
+
+-- Configuration
+local GlueOffset = Vector3.new(0, 5, 0)
+local GlueAngle = CFrame.Angles(-math.pi / 2, 0, 0)
+local GlueEnabled = false
+
+-- Main Settings
+Main_Tab:AddToggle("glue_enabled", {
+    Text = "Glue Enabled",
+    Default = false,
+    Callback = function(value)
+        GlueEnabled = value
+        if not value then
+            -- Disable glue when toggled off
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                pcall(function()
+                    sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil)
+                end)
+            end
+        end
+    end
+}):AddKeyPicker('glue_keybind', {
+    Default = 'G',
+    Mode = 'Toggle',
+    Text = 'Glue Toggle',
+    NoUI = false,
+})
+
+Main_Tab:AddDropdown("glue_target_type", {
+    Text = "Target Type",
+    Default = 1,
+    Values = {"Silent", "Aimbot", "Ragebot"},
+    Tooltip = "Which target to glue to"
+})
+
+Main_Tab:AddToggle("auto_update_position", {
+    Text = "Auto Update Position",
+    Default = true,
+    Tooltip = "Continuously update glue position (recommended)"
+})
+
+Main_Tab:AddToggle("show_notifications", {
+    Text = "Show Notifications",
+    Default = true,
+})
+
+Main_Tab:AddToggle("only_when_target", {
+    Text = "Only When Target Exists",
+    Default = true,
+    Tooltip = "Only glue when you have a target"
+})
+
+Main_Tab:AddButton({
+    Text = "Manual Unglue",
+    Func = function()
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            pcall(function()
+                sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil)
+            end)
+            if Toggles['show_notifications'].Value then
+                api:notify("Manually unglued", 2)
+            end
+        end
+    end
+})
+
+-- Position Settings
+Position_Tab:AddLabel("Offset from Target")
+
+Position_Tab:AddSlider("glue_offset_x", {
+    Text = "X Offset",
+    Default = 0,
+    Min = -30,
+    Max = 30,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        GlueOffset = Vector3.new(value, GlueOffset.Y, GlueOffset.Z)
+    end
+})
+
+Position_Tab:AddSlider("glue_offset_y", {
+    Text = "Y Offset",
+    Default = 5,
+    Min = -30,
+    Max = 300000000000000,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        GlueOffset = Vector3.new(GlueOffset.X, value, GlueOffset.Z)
+    end
+})
+
+Position_Tab:AddSlider("glue_offset_z", {
+    Text = "Z Offset",
+    Default = 0,
+    Min = -30,
+    Max = 30,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        GlueOffset = Vector3.new(GlueOffset.X, GlueOffset.Y, value)
+    end
+})
+
+Position_Tab:AddDivider()
+
+Position_Tab:AddDropdown("preset_positions", {
+    Text = "Position Presets",
+    Default = 1,
+    Values = {"Custom", "Above", "Below", "Front", "Behind", "Left", "Right", "Above Front", "Above Behind"},
+    Callback = function(value)
+        if value == "Above" then
+            GlueOffset = Vector3.new(0, 5, 0)
+        elseif value == "Below" then
+            GlueOffset = Vector3.new(0, -5, 0)
+        elseif value == "Front" then
+            GlueOffset = Vector3.new(0, 0, -5)
+        elseif value == "Behind" then
+            GlueOffset = Vector3.new(0, 0, 5)
+        elseif value == "Left" then
+            GlueOffset = Vector3.new(-5, 0, 0)
+        elseif value == "Right" then
+            GlueOffset = Vector3.new(5, 0, 0)
+        elseif value == "Above Front" then
+            GlueOffset = Vector3.new(0, 5, -5)
+        elseif value == "Above Behind" then
+            GlueOffset = Vector3.new(0, 5, 5)
+        end
+        
+        if value ~= "Custom" then
+            Options['glue_offset_x']:SetValue(GlueOffset.X)
+            Options['glue_offset_y']:SetValue(GlueOffset.Y)
+            Options['glue_offset_z']:SetValue(GlueOffset.Z)
+        end
+    end
+})
+
+Position_Tab:AddButton({
+    Text = "Reset Position",
+    Func = function()
+        Options['glue_offset_x']:SetValue(0)
+        Options['glue_offset_y']:SetValue(5)
+        Options['glue_offset_z']:SetValue(0)
+        if Toggles['show_notifications'].Value then
+            api:notify("Position reset to default", 2)
+        end
+    end
+})
+
+Position_Tab:AddLabel("Position Guide:")
+Position_Tab:AddLabel("Y+ = Above | Y- = Below")
+Position_Tab:AddLabel("X+ = Right | X- = Left")
+Position_Tab:AddLabel("Z+ = Behind | Z- = Front")
+
+-- Rotation Settings
+Rotation_Tab:AddLabel("Rotation (Degrees)")
+
+Rotation_Tab:AddSlider("glue_pitch", {
+    Text = "Pitch (X Rotation)",
+    Default = -90,
+    Min = -180,
+    Max = 180,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        local _, y, z = GlueAngle:ToEulerAnglesYXZ()
+        GlueAngle = CFrame.Angles(math.rad(value), y, z)
+    end
+})
+
+Rotation_Tab:AddSlider("glue_yaw", {
+    Text = "Yaw (Y Rotation)",
+    Default = 0,
+    Min = -180,
+    Max = 180,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        local x, _, z = GlueAngle:ToEulerAnglesYXZ()
+        GlueAngle = CFrame.Angles(x, math.rad(value), z)
+    end
+})
+
+Rotation_Tab:AddSlider("glue_roll", {
+    Text = "Roll (Z Rotation)",
+    Default = 0,
+    Min = -180,
+    Max = 180,
+    Rounding = 1,
+    Compact = true,
+    Callback = function(value)
+        local x, y = GlueAngle:ToEulerAnglesYXZ()
+        GlueAngle = CFrame.Angles(x, y, math.rad(value))
+    end
+})
+
+Rotation_Tab:AddDivider()
+
+Rotation_Tab:AddDropdown("preset_rotations", {
+    Text = "Rotation Presets",
+    Default = 1,
+    Values = {"Custom", "Face Down", "Face Up", "Face Forward", "Face Back", "Face Left", "Face Right"},
+    Callback = function(value)
+        if value == "Face Down" then
+            GlueAngle = CFrame.Angles(-math.pi / 2, 0, 0)
+            Options['glue_pitch']:SetValue(-90)
+            Options['glue_yaw']:SetValue(0)
+            Options['glue_roll']:SetValue(0)
+        elseif value == "Face Up" then
+            GlueAngle = CFrame.Angles(math.pi / 2, 0, 0)
+            Options['glue_pitch']:SetValue(90)
+            Options['glue_yaw']:SetValue(0)
+            Options['glue_roll']:SetValue(0)
+        elseif value == "Face Forward" then
+            GlueAngle = CFrame.Angles(0, 0, 0)
+            Options['glue_pitch']:SetValue(0)
+            Options['glue_yaw']:SetValue(0)
+            Options['glue_roll']:SetValue(0)
+        elseif value == "Face Back" then
+            GlueAngle = CFrame.Angles(0, math.pi, 0)
+            Options['glue_pitch']:SetValue(0)
+            Options['glue_yaw']:SetValue(180)
+            Options['glue_roll']:SetValue(0)
+        elseif value == "Face Left" then
+            GlueAngle = CFrame.Angles(0, math.pi / 2, 0)
+            Options['glue_pitch']:SetValue(0)
+            Options['glue_yaw']:SetValue(90)
+            Options['glue_roll']:SetValue(0)
+        elseif value == "Face Right" then
+            GlueAngle = CFrame.Angles(0, -math.pi / 2, 0)
+            Options['glue_pitch']:SetValue(0)
+            Options['glue_yaw']:SetValue(-90)
+            Options['glue_roll']:SetValue(0)
+        end
+    end
+})
+
+Rotation_Tab:AddButton({
+    Text = "Reset Rotation",
+    Func = function()
+        Options['glue_pitch']:SetValue(-90)
+        Options['glue_yaw']:SetValue(0)
+        Options['glue_roll']:SetValue(0)
+        if Toggles['show_notifications'].Value then
+            api:notify("Rotation reset to default", 2)
+        end
+    end
+})
+
+Rotation_Tab:AddButton({
+    Text = "Reset All Settings",
+    Func = function()
+        Options['glue_offset_x']:SetValue(0)
+        Options['glue_offset_y']:SetValue(5)
+        Options['glue_offset_z']:SetValue(0)
+        Options['glue_pitch']:SetValue(-90)
+        Options['glue_yaw']:SetValue(0)
+        Options['glue_roll']:SetValue(0)
+        if Toggles['show_notifications'].Value then
+            api:notify("All settings reset to default", 2)
+        end
+    end
+})
+
+-- Function to enable glue
+local function EnableGlue(target)
+    if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
+        return false
+    end
+    
+    local TargetPart = target.Character.HumanoidRootPart
+    
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        -- Set physics attachment
+        pcall(function()
+            sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", TargetPart)
+        end)
+        
+        -- Set desync position with custom angle
+        local desyncCFrame = CFrame.new(TargetPart.Position + GlueOffset) * GlueAngle
+        api:set_desync_cframe(desyncCFrame)
+        return true
+    end
+    return false
+end
+
+-- Function to disable glue
+local function DisableGlue()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        pcall(function()
+            sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil)
+        end)
+    end
+end
+
+-- Main glue loop
+local CurrentTarget = nil
+Handler:AddConnection("Sticky Glue Update", RunService.Heartbeat:Connect(function()
+    if not Toggles['glue_enabled'] or not Toggles['glue_enabled'].Value or not Options['glue_keybind']:GetState() then
+        if CurrentTarget then
+            DisableGlue()
+            CurrentTarget = nil
+        end
+        return
+    end
+    
+    -- Get target based on selected type
+    local targetType = Options['glue_target_type'].Value:lower()
+    local Target = api:get_target(targetType)
+    
+    -- Check if we should only glue when target exists
+    if Toggles['only_when_target'].Value and not Target then
+        if CurrentTarget then
+            DisableGlue()
+            CurrentTarget = nil
+            if Toggles['show_notifications'].Value then
+                api:notify("Target lost - unglued", 2)
+            end
+        end
+        return
+    end
+    
+    -- If we have a target, glue to them
+    if Target then
+        -- Notify when we get a new target
+        if CurrentTarget ~= Target then
+            CurrentTarget = Target
+            if Toggles['show_notifications'].Value then
+                api:notify("Glued to " .. Target.Name, 2)
+            end
+        end
+        
+        -- Update glue position every frame if enabled
+        if Toggles['auto_update_position'].Value then
+            EnableGlue(Target)
+        end
+    end
+end))
+
+-- Unload handler
+api:on_event("unload", function()
+    DisableGue()
+    api:notify("Sticky glue unloaded", 2)
+end)
+
+api:notify("Sticky glue loaded - Press G to toggle", 3)

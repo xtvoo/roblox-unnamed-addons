@@ -1,0 +1,198 @@
+--[[ 
+    Unnamed Addon: China Hat (Extracted from symbol.txt)
+    Features: Multi-color gradient rotating hat with Drawing API
+]]
+
+api:set_lua_name("ChinaHat_Symbol")
+
+-- Services
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- UI Setup
+local tabs = { Visuals = api:GetTab("visuals") or api:AddTab("visuals") }
+local section = tabs.Visuals:AddLeftGroupbox("China Hat")
+
+-- Create UI elements and store references
+local ChinaHatToggle = section:AddToggle("ChinaHat", { Text = "Enable China Hat", Default = false })
+local Color1Picker = section:AddLabel("Color 1"):AddColorPicker("Color1", { Default = Color3.fromRGB(255, 255, 255) })
+local Color2Picker = section:AddLabel("Color 2"):AddColorPicker("Color2", { Default = Color3.fromRGB(255, 255, 255) })
+local Color3Picker = section:AddLabel("Color 3"):AddColorPicker("Color3", { Default = Color3.fromRGB(255, 255, 255) })
+local Color4Picker = section:AddLabel("Color 4"):AddColorPicker("Color4", { Default = Color3.fromRGB(255, 255, 255) })
+
+local HeightSlider = section:AddSlider("Height", { Text = "Height", Default = 0.7, Min = 0.1, Max = 3, Rounding = 1 })
+local RadiusSlider = section:AddSlider("Radius", { Text = "Radius", Default = 2, Min = 0.5, Max = 5, Rounding = 1 })
+local SidesSlider = section:AddSlider("Sides", { Text = "Sides", Default = 25, Min = 3, Max = 50, Rounding = 0 })
+local HatTransSlider = section:AddSlider("HatTrans", { Text = "Hat Transparency", Default = 0.35, Min = 0, Max = 1, Rounding = 2 })
+local LineTransSlider = section:AddSlider("LineTrans", { Text = "Line Transparency", Default = 1, Min = 0, Max = 1, Rounding = 2 })
+local SpeedSlider = section:AddSlider("Speed", { Text = "Speed", Default = 0.2, Min = 0, Max = 2, Rounding = 2 })
+local OffsetYSlider = section:AddSlider("OffsetY", { Text = "Offset Y", Default = 0.5, Min = -2, Max = 5, Rounding = 1 })
+
+-- Helper functions from symbol.txt
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function lerpColor(a, b, t)
+    return Color3.new(lerp(a.R, b.R, t), lerp(a.G, b.G, t), lerp(a.B, b.B, t))
+end
+
+local function getColor(progress, time, speed, c1, c2, c3, c4)
+    local s = (progress + time * speed) % 1
+    if s < 0.25 then
+        return lerpColor(c1, c2, s / 0.25)
+    elseif s < 0.5 then
+        return lerpColor(c2, c3, (s - 0.25) / 0.25)
+    elseif s < 0.75 then
+        return lerpColor(c3, c4, (s - 0.5) / 0.25)
+    else
+        return lerpColor(c4, c1, (s - 0.75) / 0.25)
+    end
+end
+
+-- Drawing storage
+local drawings = {}
+
+local function createDrawings(sides)
+    -- Clear old drawings
+    for _, d in ipairs(drawings) do
+        pcall(function()
+            if d[1] then d[1]:Remove() end
+            if d[2] then d[2]:Remove() end
+        end)
+    end
+    drawings = {}
+
+    -- Create new drawings
+    for i = 1, sides do
+        local line = Drawing.new("Line")
+        local triangle = Drawing.new("Triangle")
+        
+        line.ZIndex = 2
+        line.Thickness = 1
+        
+        triangle.ZIndex = 1
+        triangle.Filled = true
+        
+        table.insert(drawings, {line, triangle})
+    end
+end
+
+local function setVisibility(visible)
+    for _, d in ipairs(drawings) do
+        if d[1] then d[1].Visible = visible end
+        if d[2] then d[2].Visible = visible end
+    end
+end
+
+local function cleanup()
+    for _, d in ipairs(drawings) do
+        pcall(function()
+            if d[1] then d[1]:Remove() end
+            if d[2] then d[2]:Remove() end
+        end)
+    end
+    drawings = {}
+end
+
+-- Main render function
+local function render()
+    local enabled = ChinaHatToggle.Value
+    
+    if not enabled then
+        cleanup()
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local head = char and char:FindFirstChild("Head")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+    if not (char and head and hum and hum.Health > 0) then
+        setVisibility(false)
+        return
+    end
+
+    -- Get current settings
+    local sides = SidesSlider.Value or 25
+    local height = HeightSlider.Value or 0.7
+    local radius = RadiusSlider.Value or 2
+    local offsetY = OffsetYSlider.Value or 0.5
+    local hatTrs = HatTransSlider.Value or 0.35
+    local lineTrs = LineTransSlider.Value or 1
+    local speed = SpeedSlider.Value or 0.2
+    local c1 = Color1Picker.Value or Color3.fromRGB(255, 255, 255)
+    local c2 = Color2Picker.Value or Color3.fromRGB(255, 255, 255)
+    local c3 = Color3Picker.Value or Color3.fromRGB(255, 255, 255)
+    local c4 = Color4Picker.Value or Color3.fromRGB(255, 255, 255)
+
+    -- Recreate drawings if sides changed
+    if #drawings ~= sides then
+        createDrawings(sides)
+    end
+
+    local time = tick()
+    local fullCircle = math.pi * 2
+    local topPos = head.Position + Vector3.new(0, offsetY + height, 0)
+    local basePos = head.Position + Vector3.new(0, offsetY, 0)
+
+    -- Check if on screen
+    local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+    if not onScreen or screenPos.Z <= 0 then
+        setVisibility(false)
+        return
+    end
+
+    -- Draw each segment
+    for i = 1, sides do
+        local line, triangle = drawings[i][1], drawings[i][2]
+        
+        local progress1 = i / sides
+        local progress2 = (i % sides + 1) / sides
+        
+        local angle1 = progress1 * fullCircle
+        local angle2 = progress2 * fullCircle
+        
+        local point1 = basePos + Vector3.new(math.cos(angle1), 0, math.sin(angle1)) * radius
+        local point2 = basePos + Vector3.new(math.cos(angle2), 0, math.sin(angle2)) * radius
+        
+        local screen1 = Camera:WorldToViewportPoint(point1)
+        local screen2 = Camera:WorldToViewportPoint(point2)
+        local screenTop = Camera:WorldToViewportPoint(topPos)
+        
+        local col = getColor(progress1, time, speed, c1, c2, c3, c4)
+        
+        -- Draw line (outline)
+        line.From = Vector2.new(screen1.X, screen1.Y)
+        line.To = Vector2.new(screen2.X, screen2.Y)
+        line.Color = col
+        line.Transparency = lineTrs
+        line.Visible = true
+        
+        -- Draw triangle (filled)
+        triangle.PointA = Vector2.new(screenTop.X, screenTop.Y)
+        triangle.PointB = line.From
+        triangle.PointC = line.To
+        triangle.Color = col
+        triangle.Transparency = hatTrs
+        triangle.Visible = true
+    end
+end
+
+-- Enable/Disable function
+ChinaHatToggle:OnChanged(function()
+    local enabled = ChinaHatToggle.Value
+    if enabled then
+        api:add_connection(RunService.RenderStepped:Connect(render))
+    else
+        cleanup()
+    end
+end)
+
+-- Cleanup on unload
+api:on_event("unload", function()
+    cleanup()
+    api:notify("China Hat Unloaded", 2)
+end)

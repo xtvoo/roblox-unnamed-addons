@@ -1,0 +1,391 @@
+-- Visual Skin Script - Complete Version
+api:set_lua_name("visualskins")
+
+api:on_event("unload", function()
+    api:notify("Visual Skin Script unloaded", 2)
+end)
+
+-- Services
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Levenshtein Distance
+local function LevenshteinDistance(s1, s2)
+    local len1, len2 = #s1, #s2
+    
+    if len1 == 0 then return len2 end
+    if len2 == 0 then return len1 end
+    
+    local matrix = {}
+    for i = 0, len1 do
+        matrix[i] = {[0] = i}
+    end
+    for j = 0, len2 do
+        matrix[0][j] = j
+    end
+    
+    for i = 1, len1 do
+        for j = 1, len2 do
+            local cost = (s1:sub(i, i) == s2:sub(j, j)) and 0 or 1
+            matrix[i][j] = math.min(
+                matrix[i-1][j] + 1,
+                matrix[i][j-1] + 1,
+                matrix[i-1][j-1] + cost
+            )
+        end
+    end
+    
+    return matrix[len1][len2]
+end
+
+-- Skin database
+local HARDCODED_SKINS = {
+    ["[Mask]"] = {"Ski Mask X)", "Ski Mask Saint II", "Bandana Black", "Bandana DH", "Hockey", "Hockey DH", "Ski Mask II", "Ski Mask II DH", "Wraith", "Ski Mask", "Ski Mask Saint"},
+    ["[AUG]"] = {"Jungle Blaster", "1984", "Gold Glory", "Battleworn Silver", "Battleworn Purple", "Battleworn Orange", "Battleworn Red", "White Stripes", "Future", "Battleworn Green", "Battleworn Pink", "Red Tiger", "Black & White", "Rainbow", "Military", "Shadow", "Danger", "GPOII", "Venom", "Pink Fuchsia", "Matrix", "Biohazard"},
+    ["[Shotgun]"] = {"Jungle Blaster", "Danger", "Red Death", "Battleworn Orange", "Battleworn Purple", "Black & White", "Battleworn Red", "1984", "Fish", "Battleworn Green", "Battleworn Pink", "Red Tiger"},
+    ["[Silencer]"] = {"Battleworn Pink", "Mummy", "Battleworn Orange", "Valentine", "Battleworn Lilac", "Battleworn Green", "Icey", "1984", "Jungle Blaster"},
+    ["[Revolver]"] = {"Jungle Blaster", "Galaxy", "Arcade", "Snow Wrap", "Red Hot", "White Stripes", "Icey", "Xmas25", "Battleworn Green", "Battleworn Pink", "Battleworn Purple", "Future"},
+    ["[SilencerAR]"] = {"Jungle Blaster", "White Stripes", "Battleworn Red", "Battleworn Blue", "Battleworn Pink"},
+    ["[LMG]"] = {"Jungle Blaster", "Danger", "1984", "Battleworn Purple", "Battleworn Orange", "White Stripes"},
+    ["[Glock]"] = {"Jungle Blaster", "Battleworn Lilac", "1984", "Battleworn Purple", "Battleworn Orange"},
+    ["[Double-Barrel SG]"] = {"Jungle Blaster", "Arcade", "Snow Wrap", "Skull", "White Stripes", "Danger", "Stars", "Battleworn Pink"},
+    ["[Drum-Shotgun]"] = {"Light Camo", "Battleworn Red", "1984", "Purple Yellow Wrap"},
+    ["[SMG]"] = {"Jungle Blaster", "1984", "Danger", "Rainbow", "Battleworn Pink", "White Stripes"},
+    ["[TacticalShotgun]"] = {"Shadow", "White Stripes", "Battleworn Pink", "Battleworn Red", "Battleworn Green"},
+    ["[AK47]"] = {"Jungle Blaster", "Battleworn Purple", "Battleworn Red", "Battleworn Blue", "White Stripes"},
+    ["[Knife]"] = {"Kunai", "GingerBread", "Pink", "Screw Driver", "Kitchen", "Katar", "Skull", "Red Tiger"},
+    ["[Flamethrower]"] = {"Battleworn Orange", "White Stripes", "Future", "Battleworn Green"},
+    ["[Wallet]"] = {"Pink Purse", "Designer Pink", "Pig", "Bitcoin"},
+    ["[House]"] = {"House 2", "Villa Nova", "Gingerbread House"},
+    ["[Vehicle]"] = {"Moped", "Police", "Motorcycle", "Cyber"},
+    ["[RPG]"] = {"Jungle Blaster", "Battleworn Purple", "Battleworn Red", "White Stripes"},
+    ["[P90]"] = {"Jungle Blaster", "1984", "Battleworn Purple", "Battleworn Pink"},
+    ["[Rifle]"] = {"Jungle Blaster", "1984", "Battleworn Purple", "Battleworn Red"},
+    ["[DrumGun]"] = {"1984", "Battleworn Purple", "White Stripes"},
+    ["[AR]"] = {"Jungle Blaster", "1984", "Battleworn Pink", "Battleworn Red"},
+}
+
+local SKIN_DATABASE = HARDCODED_SKINS
+local CATEGORY_LIST = {}
+for category, _ in pairs(HARDCODED_SKINS) do
+    table.insert(CATEGORY_LIST, category)
+end
+table.sort(CATEGORY_LIST)
+
+local SELECTED_CATEGORY = CATEGORY_LIST[1] or "[Knife]"
+local SELECTED_SKIN = SKIN_DATABASE[SELECTED_CATEGORY][1] or ""
+local VISUAL_SKIN_APPLIED = false
+
+-- Get character weapon/item folder
+local function GetCharacterItemFolder()
+    local char = Players.LocalPlayer.Character
+    if not char then return nil end
+    return char:FindFirstChild("Items") or char
+end
+
+-- Apply visual skin to your character
+local function ApplyVisualSkin(category, skinName)
+    local char = Players.LocalPlayer.Character
+    if not char then
+        api:notify("Character not loaded!", 3)
+        return false
+    end
+    
+    -- Find weapon matching category
+    local itemsFolder = char:FindFirstChild("Items") or char
+    local targetItem = nil
+    
+    for _, item in pairs(itemsFolder:GetChildren()) do
+        if item.Name == category:sub(2, -2) then -- Remove brackets
+            targetItem = item
+            break
+        end
+    end
+    
+    if not targetItem then
+        api:notify("Weapon not found: " .. category, 3)
+        return false
+    end
+    
+    -- Try to find skin configuration
+    local skinConfig = targetItem:FindFirstChild("SkinName")
+    if skinConfig then
+        skinConfig.Value = skinName
+        api:notify("Applied visual skin: " .. skinName, 2)
+        return true
+    end
+    
+    -- Alternative: look for SkinId
+    local skinId = targetItem:FindFirstChild("SkinId")
+    if skinId then
+        skinId.Value = skinName
+        api:notify("Applied visual skin: " .. skinName, 2)
+        return true
+    end
+    
+    -- Create new skin value if it doesn't exist
+    local newSkin = Instance.new("StringValue")
+    newSkin.Name = "SkinName"
+    newSkin.Value = skinName
+    newSkin.Parent = targetItem
+    
+    api:notify("Applied visual skin: " .. skinName, 2)
+    return true
+end
+
+-- Copy player's visual skins
+local function CopyPlayerVisuals(targetPlayer)
+    if not targetPlayer.Character then
+        api:notify("Target has no character!", 3)
+        return
+    end
+    
+    local yourChar = Players.LocalPlayer.Character
+    if not yourChar then
+        api:notify("Your character not loaded!", 3)
+        return
+    end
+    
+    local targetItems = targetPlayer.Character:FindFirstChild("Items") or targetPlayer.Character
+    local yourItems = yourChar:FindFirstChild("Items") or yourChar
+    
+    local copiedCount = 0
+    
+    for _, targetItem in pairs(targetItems:GetChildren()) do
+        local skinName = targetItem:FindFirstChild("SkinName")
+        if not skinName then
+            skinName = targetItem:FindFirstChild("SkinId")
+        end
+        
+        if skinName and skinName.Value ~= "" then
+            -- Find matching item in your inventory
+            local yourItem = yourItems:FindFirstChild(targetItem.Name)
+            if yourItem then
+                local yourSkinValue = yourItem:FindFirstChild("SkinName")
+                if not yourSkinValue then
+                    yourSkinValue = yourItem:FindFirstChild("SkinId")
+                end
+                
+                if yourSkinValue then
+                    yourSkinValue.Value = skinName.Value
+                    copiedCount = copiedCount + 1
+                else
+                    local newSkin = Instance.new("StringValue")
+                    newSkin.Name = "SkinName"
+                    newSkin.Value = skinName.Value
+                    newSkin.Parent = yourItem
+                    copiedCount = copiedCount + 1
+                end
+            end
+        end
+    end
+    
+    api:notify("✓ Copied " .. copiedCount .. " visual skins from " .. targetPlayer.Name, 3)
+end
+
+-- Create UI
+local VisualTab = api:AddTab("Visual Skins")
+local MainBox = VisualTab:AddLeftGroupbox("Visual Skin Manager")
+local InfoBox = VisualTab:AddRightGroupbox("Info")
+
+MainBox:AddLabel("Visual Skin Changer")
+MainBox:AddLabel("Apply skins visually in-game")
+MainBox:AddDivider()
+
+-- Category dropdown
+MainBox:AddDropdown("visual_category", {
+    Values = CATEGORY_LIST,
+    Default = 1,
+    Multi = false,
+    Text = "Weapon Category",
+    Tooltip = "Select weapon type",
+    Callback = function(value)
+        SELECTED_CATEGORY = value
+        local skinDropdown = api:get_ui_object("visual_skin")
+        local skins = SKIN_DATABASE[value] or {}
+        skinDropdown:SetValues(skins)
+        if #skins > 0 then
+            skinDropdown:SetValue(skins[1])
+            SELECTED_SKIN = skins[1]
+        end
+        api:notify("Category: " .. value, 1.5)
+    end
+})
+
+-- Skin dropdown
+local initialSkins = SKIN_DATABASE[SELECTED_CATEGORY] or {}
+MainBox:AddDropdown("visual_skin", {
+    Values = initialSkins,
+    Default = 1,
+    Multi = false,
+    Text = "Select Skin",
+    Tooltip = "Choose visual skin to apply",
+    Callback = function(value)
+        SELECTED_SKIN = value
+        api:notify("Selected: " .. value, 1.5)
+    end
+})
+
+-- Search input
+MainBox:AddInput("skin_search", {
+    Default = "",
+    Numeric = false,
+    Finished = true,
+    Text = "Or search skin",
+    Placeholder = "Type skin name..."
+})
+
+MainBox:AddButton({
+    Text = "Search Skin",
+    Func = function()
+        local search = Options.skin_search.Value:lower()
+        if search == "" then
+            api:notify("Type a skin name!", 2)
+            return
+        end
+        
+        local skins = SKIN_DATABASE[SELECTED_CATEGORY] or {}
+        local found = nil
+        
+        -- Exact match
+        for _, skin in ipairs(skins) do
+            if skin:lower() == search then
+                found = skin
+                break
+            end
+        end
+        
+        -- Starts with
+        if not found then
+            for _, skin in ipairs(skins) do
+                if string.sub(skin:lower(), 1, #search) == search then
+                    found = skin
+                    break
+                end
+            end
+        end
+        
+        -- Contains
+        if not found then
+            for _, skin in ipairs(skins) do
+                if string.find(skin:lower(), search, 1, true) then
+                    found = skin
+                    break
+                end
+            end
+        end
+        
+        if found then
+            SELECTED_SKIN = found
+            local dropdown = api:get_ui_object("visual_skin")
+            dropdown:SetValue(found)
+            api:notify("✓ Found: " .. found, 2)
+        else
+            api:notify("✗ Skin not found", 3)
+        end
+    end
+})
+
+MainBox:AddDivider()
+
+MainBox:AddButton({
+    Text = "Apply Visual Skin",
+    Func = function()
+        if SELECTED_SKIN == "" then
+            api:notify("Select a skin first!", 2)
+            return
+        end
+        
+        if ApplyVisualSkin(SELECTED_CATEGORY, SELECTED_SKIN) then
+            VISUAL_SKIN_APPLIED = true
+        end
+    end
+})
+
+MainBox:AddDivider()
+MainBox:AddLabel("Copy Player Skins")
+
+-- Player target dropdown
+local playerList = {}
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= Players.LocalPlayer then
+        table.insert(playerList, player.Name)
+    end
+end
+
+local COPY_TARGET = playerList[1] or ""
+
+MainBox:AddDropdown("copy_target", {
+    Values = playerList,
+    Default = 1,
+    Multi = false,
+    Text = "Target Player",
+    Tooltip = "Select player to copy skins from",
+    Callback = function(value)
+        COPY_TARGET = value
+        api:notify("Target: " .. value, 1.5)
+    end
+})
+
+MainBox:AddButton({
+    Text = "Refresh Players",
+    Func = function()
+        playerList = {}
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= Players.LocalPlayer then
+                table.insert(playerList, player.Name)
+            end
+        end
+        
+        local dropdown = api:get_ui_object("copy_target")
+        dropdown:SetValues(playerList)
+        if #playerList > 0 then
+            dropdown:SetValue(playerList[1])
+            COPY_TARGET = playerList[1]
+        end
+        api:notify("Refreshed player list", 2)
+    end
+})
+
+MainBox:AddButton({
+    Text = "Copy Visual Skins",
+    Func = function()
+        if COPY_TARGET == "" then
+            api:notify("Select a target player!", 2)
+            return
+        end
+        
+        local targetPlayer = Players:FindFirstChild(COPY_TARGET)
+        if not targetPlayer then
+            api:notify("Player not found!", 3)
+            return
+        end
+        
+        CopyPlayerVisuals(targetPlayer)
+    end
+})
+
+-- Info box
+InfoBox:AddLabel("═══════════════════════")
+InfoBox:AddLabel("Visual Skins v1.0")
+InfoBox:AddLabel("═══════════════════════")
+InfoBox:AddLabel("")
+InfoBox:AddLabel("✓ Apply any visual skin")
+InfoBox:AddLabel("✓ Search skins")
+InfoBox:AddLabel("✓ Copy player skins")
+InfoBox:AddDivider()
+InfoBox:AddLabel("Features:")
+InfoBox:AddLabel("• Browse all skins")
+InfoBox:AddLabel("• Apply skins instantly")
+InfoBox:AddLabel("• Copy from other players")
+InfoBox:AddLabel("• 100% visual only")
+InfoBox:AddDivider()
+InfoBox:AddLabel("Status:")
+if VISUAL_SKIN_APPLIED then
+    InfoBox:AddLabel("✓ Skin applied")
+else
+    InfoBox:AddLabel("○ No skin applied")
+end
+
+api:notify("Visual Skin Script loaded!", 2)
