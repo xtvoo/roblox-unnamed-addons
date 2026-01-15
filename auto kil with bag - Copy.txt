@@ -454,10 +454,15 @@ local function UseBag()
                 State.LastBuyTime = currentTime
                 
                 task.spawn(function()
-                    DebugLog("Buying bag...")
+                    DebugLog("Attempting to buy bag...")
                     api:buy_item("brownbag", false, true)
+                    DebugLog("Buy request sent.")
                     task.wait(1.2)
                 end)
+            end
+        else
+            if not api:can_desync() then
+                DebugLog("Cannot desync (cannot buy bag)")
             end
         end
         return false
@@ -471,16 +476,15 @@ local function UseBag()
             return false
         end
         
-        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid:EquipTool(Bag)
-            State.LastEquipAttempt = currentTime
-            task.wait(0.1) -- Increased wait slightly
-        end
+        DebugLog("Equipping bag via Parent...")
+        Bag.Parent = LocalPlayer.Character
+        State.LastEquipAttempt = currentTime
+        task.wait(0.1) 
         return false -- Return false to wait for next loop (equip takes time)
     end
     
     if Bag.Parent == LocalPlayer.Character then
+        DebugLog("Activating bag...")
         Bag:Activate()
         State.LastBagAttempt = currentTime
         State.BagAttempts = State.BagAttempts + 1
