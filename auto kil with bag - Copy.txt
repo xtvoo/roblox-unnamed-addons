@@ -228,6 +228,8 @@ local State = {
     LastEquipAttempt = 0,
 }
 
+local VoidCFrame = CFrame.new(18812581888888, 99999999999999999999999999999, 998235235621111)
+
 -- ========== PLAYER LIST MANAGEMENT ==========
 local function GetPlayerFormat(player)
     return string.format("%s (@%s)", player.DisplayName, player.Name)
@@ -771,13 +773,24 @@ local PhysicsConnection = api:add_connection(RunService.Heartbeat:Connect(functi
             return
         end
         
+            end)
+            return
+        end
+        
         -- If in bag mode or pre-fire mode, glue and position
         if State.Mode == "bagging" or State.Mode == "prefire_bagging" then
             pcall(function()
                 sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
             end)
             
-            local GlueCFrame = GetBagPosition(TargetRoot)
+            local GlueCFrame
+            -- User Requested: "when target is dead void" (assuming bagged/dead implies voiding them)
+            if State.IsBagged or (State.Target and State.Target.Character and State.Target.Character:FindFirstChild("Humanoid") and State.Target.Character.Humanoid.Health <= 0) then
+                GlueCFrame = VoidCFrame
+            else
+                GlueCFrame = GetBagPosition(TargetRoot)
+            end
+            
             api:set_desync_cframe(GlueCFrame)
         end
     end
