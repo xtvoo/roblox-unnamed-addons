@@ -26,6 +26,45 @@ end, "UI Setup Tabs/Groups")
 
 safe_call(function()
     protector_group:AddToggle("protector_active", { Text = "Enable Protector", Default = false })
+    
+    local function saveConfig(owner_name)
+        if hasattr and hasattr(writefile, "function") then return end -- Safety check if needed, or just standard pcall
+        if writefile then
+             pcall(function() writefile("kitten_saver_config.txt", owner_name or "") end)
+        end
+    end
+    
+    local function loadConfig()
+        if isfile and isfile("kitten_saver_config.txt") then
+            return readfile("kitten_saver_config.txt")
+        end
+        return nil
+    end
+
+    local saved_owner = loadConfig()
+    
+    protector_group:AddInput("protector_owner_input", {
+        Default = saved_owner or "",
+        Numeric = false,
+        Finished = true,
+        Text = "Owner Username (Auto-Saves)",
+        Tooltip = "Enter username to protect. Saves automatically.",
+        Callback = function(val)
+            saveConfig(val)
+            -- Auto-update target list if valid
+            if val and val ~= "" then
+                local targets_obj = api:get_ui_object("protector_targets")
+                if targets_obj then
+                    local p = Players:FindFirstChild(val)
+                    if p then
+                       -- Logic to select this player in the dropdown could go here
+                       -- For now, we rely on the manual selection or custom logic
+                    end
+                end
+            end
+        end
+    })
+
     protector_group:AddToggle("protector_stomp", { Text = "Stomp Target (Doesnt Work w FP)", Default = false })
     protector_group:AddSlider("protector_stomp_height", { Text = "Stomp Height", Default = 3, Min = -5, Max = 10, Rounding = 1, Compact = false })
     protector_group:AddDropdown("protector_targets", { Text = "Select Players to Protect", Values = {}, Multi = true, Default = {} })
@@ -69,7 +108,24 @@ local function updatePlayerList()
         end
         
         local dropdown_p = api:get_ui_object("protector_targets")
-        if dropdown_p then dropdown_p:SetValues(dropdown_items) end
+        if dropdown_p then 
+            dropdown_p:SetValues(dropdown_items)
+            
+            -- Auto-select saved owner if just loaded/connected
+            local owner_input = api:get_ui_object("protector_owner_input")
+            if owner_input and owner_input.Value and owner_input.Value ~= "" then
+                local saved_name = owner_input.Value
+                local p = Players:FindFirstChild(saved_name)
+                if p then
+                    local fmt = getFormattedName(p)
+                    local current = dropdown_p.Value or {}
+                    if not current[fmt] then
+                        current[fmt] = true
+                        dropdown_p:SetValue(current)
+                    end
+                end
+            end
+        end
         
     end, "updatePlayerList")
 end
@@ -139,7 +195,7 @@ function restoreState()
 end
 
 local active_threats = {}
-local VoidCFrame = CFrame.new(0/0, 0/0, 0/0)
+local VoidCFrame = CFrame.new(18812581888888, 99999999999999999999999999999, 998235235621111)
 
 local stomp_connection = nil
 local follow_connection = nil 
