@@ -7,6 +7,7 @@ local Workspace = Handler:CloneRef("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
 -- ========== UI SETUP ==========
+-- ========== UI SETUP ==========
 local Tab = api:GetTab("ragebot") or api:AddTab("ragebot")
 local Main = Tab:AddLeftGroupbox("Auto Kill - Main")
 local Bagging = Tab:AddRightGroupbox("Auto Kill - Bagging")
@@ -27,6 +28,68 @@ Main:AddToggle("AutoStomp", {
 Main:AddToggle("SilentAimOnly", {
     Text = "Silent Aim Target Only",
     Default = false,
+    Tooltip = "Only target players locked by silent aim (ignoring proximity)"
+})
+
+Bagging:AddDropdown("BagStrategy", {
+    Values = {"Adaptive", "Behind", "Below", "Aggressive Spin"},
+    Default = 1,
+    Text = "Bag Position Strategy",
+    Tooltip = "Adaptive tries multiple positions"
+})
+Bagging:AddSlider("BagSpamRate", { 
+    Text = "Bag Spam Rate", 
+    Default = 5, 
+    Min = 1, 
+    Max = 10, 
+    Rounding = 0, 
+    Suffix = " bags/sec" 
+})
+Bagging:AddSlider("BagDistance", {
+    Text = "Behind Distance",
+    Default = 2.5,
+    Min = 0.5,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddSlider("BagHeight", {
+    Text = "Below Height",
+    Default = 2,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+    Suffix = " studs"
+})
+Bagging:AddToggle("AdaptiveBag", { 
+    Text = "Auto Adjust Position", 
+    Default = true, 
+    Tooltip = "Changes position if bag fails" 
+})
+Bagging:AddDivider()
+Bagging:AddToggle("PreFireBag", {
+    Text = "Pre-Fire Bagging",
+    Default = true,
+    Tooltip = "Start bagging before they fully die"
+})
+Bagging:AddSlider("PreFireDelay", {
+    Text = "Pre-Fire Delay",
+    Default = 0.2,
+    Min = 0,
+    Max = 1,
+    Rounding = 2,
+    Suffix = " seconds",
+    Tooltip = "Time after bag removal to start re-bagging"
+})
+
+Safety:AddToggle("VoidWhenAlive", {
+    Text = "Void When Target Alive",
+    Default = true,
+    Tooltip = "Go to void when target can shoot back"
+})
+Safety:AddToggle("CheckToolStatus", {
+    Text = "Check Tool Status",
+    Default = true,
     Tooltip = "Only target players locked by silent aim (ignoring aimbot/proximity)"
 })
 
@@ -48,10 +111,55 @@ Main:AddInput("PlayerSearchInput", {
     Tooltip = "Type name to auto-select player",
     Placeholder = "Username or Display Name",
 })
+Safety:AddToggle("DebugMode", { Text = "Debug Notifications", Default = false })
+
+-- ========== FLAGS ==========
+local Flags = {
+    RageTarget = api:get_ui_object("ragebot_targets"),
+    RageFlame  = api:get_ui_object("ragebot_flame"),
+    VoidProt   = api:get_ui_object("character_prot_void"),
+}
+
+-- ========== STATE ==========
+local State = {
+    Target = nil,
+    IsBagged = false,
+    IsKnocked = false,
+    LastSetTarget = "",
+    BuyingBag = false,
+    LastBuyTime = 0,
+    BagAttempts = 0,
+    LastBagCheck = 0,
+    LastBagAttempt = 0,
+    Mode = "idle",
+    CurrentStrategy = 1,
+    StrategyFailCount = 0,
+    LastBagSuccess = 0,
+    BagRemovedTime = 0,
+    WasJustBagged = false,
+    ShouldVoid = false,
+}
+
+-- ========== PLAYER LIST MANAGEMENT ==========
+local function GetPlayerFormat(player)
+    return string.format("%s (@%s)", player.DisplayName, player.Name)
+end
+
+local function UpdatePlayerList()
+    local values = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(values, GetPlayerFormat(player))
+        end
+    end
+    PlayerDropdown:SetValues(values)
+end
+
+api:add_connection(Players.PlayerAdded:Connect(UpdatePlayerList))
+api:add_connection(Players.PlayerRemoving:Connect(function() task.delay(0.1, UpdatePlayerList) end))
+UpdatePlayerList()
 
 Options.PlayerSearchInput:OnChanged(function(val)
-    print("Input Debug: ", val) -- Debug print
-    
     if not val or type(val) ~= "string" then return end
     
     -- Trim whitespace
@@ -120,134 +228,6 @@ Options.PlayerSearchInput:OnChanged(function(val)
         Options.PlayerSearchInput:SetValue("")
     end
 end)
-
-Bagging:AddDropdown("BagStrategy", {
-    Values = {"Adaptive", "Behind", "Below", "Aggressive Spin"},
-    Default = 1,
-    Text = "Bag Position Strategy",
-    Tooltip = "Adaptive tries multiple positions"
-})
-Bagging:AddSlider("BagSpamRate", { 
-    Text = "Bag Spam Rate", 
-    Default = 5, 
-    Min = 1, 
-    Max = 10, 
-    Rounding = 0, 
-    Suffix = " bags/sec" 
-})
-
-Bagging:AddSlider("EquipCooldown", {
-    Text = "Equip Cooldown",
-    Default = 0.5,
-    Min = 0.1,
-    Max = 2.0,
-    Rounding = 1,
-    Suffix = "s",
-    Tooltip = "Delay between equip attempts to prevent kicks"
-})
-
--- Server Bagging UI
--- Server Bagging Removed
--- Infinite Bag Removed
--- Wait For ForceField Removed
-Bagging:AddSlider("BagDistance", {
-    Text = "Behind Distance",
-    Default = 2.5,
-    Min = 0.5,
-    Max = 5,
-    Rounding = 1,
-    Suffix = " studs"
-})
-Bagging:AddSlider("BagHeight", {
-    Text = "Below Height",
-    Default = 2,
-    Min = 0,
-    Max = 5,
-    Rounding = 1,
-    Suffix = " studs"
-})
-Bagging:AddToggle("AdaptiveBag", { 
-    Text = "Auto Adjust Position", 
-    Default = true, 
-    Tooltip = "Changes position if bag fails" 
-})
-Bagging:AddDivider()
-Bagging:AddToggle("PreFireBag", {
-    Text = "Pre-Fire Bagging",
-    Default = true,
-    Tooltip = "Start bagging before they fully die"
-})
-Bagging:AddSlider("PreFireDelay", {
-    Text = "Pre-Fire Delay",
-    Default = 0.2,
-    Min = 0,
-    Max = 1,
-    Rounding = 2,
-    Suffix = " seconds",
-    Tooltip = "Time after bag removal to start re-bagging"
-})
-
-Safety:AddToggle("VoidWhenAlive", {
-    Text = "Void When Target Alive",
-    Default = true,
-    Tooltip = "Go to void when target can shoot back"
-})
-Safety:AddToggle("CheckToolStatus", {
-    Text = "Check Tool Status",
-    Default = true,
-    Tooltip = "Only void if they have a gun equipped"
-})
-Safety:AddToggle("DebugMode", { Text = "Debug Notifications", Default = false })
-
--- ========== FLAGS ==========
-local Flags = {
-    RageTarget = api:get_ui_object("ragebot_targets"),
-    RageFlame  = api:get_ui_object("ragebot_flame"),
-    VoidProt   = api:get_ui_object("character_prot_void"),
-}
-
--- ========== STATE ==========
-local State = {
-    Target = nil,
-    IsBagged = false,
-    IsKnocked = false,
-    LastSetTarget = "",
-    BuyingBag = false,
-    LastBuyTime = 0,
-    BagAttempts = 0,
-    LastBagCheck = 0,
-    LastBagAttempt = 0,
-    Mode = "idle",
-    CurrentStrategy = 1,
-    StrategyFailCount = 0,
-    LastBagSuccess = 0,
-    BagRemovedTime = 0,
-    WasJustBagged = false,
-    ShouldVoid = false,
-    BagStartTime = 0,
-    LastEquipAttempt = 0,
-}
-
-local VoidCFrame = CFrame.new(18812581888888, 99999999999999999999999999999, 998235235621111)
-
--- ========== PLAYER LIST MANAGEMENT ==========
-local function GetPlayerFormat(player)
-    return string.format("%s (@%s)", player.DisplayName, player.Name)
-end
-
-local function UpdatePlayerList()
-    local values = {}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(values, GetPlayerFormat(player))
-        end
-    end
-    PlayerDropdown:SetValues(values)
-end
-
-api:add_connection(Players.PlayerAdded:Connect(UpdatePlayerList))
-api:add_connection(Players.PlayerRemoving:Connect(function() task.delay(0.1, UpdatePlayerList) end))
-UpdatePlayerList()
 
 -- ========== BAG POSITION STRATEGIES ==========
 local BagStrategies = {
@@ -353,7 +333,6 @@ end
 
 local function IsTargetValid(player)
     if not player or not player.Character then return false end
-    if player == LocalPlayer then return false end -- Explicitly ignore self
     
     local statusCache = api:get_status_cache(player)
     if not statusCache then return false end
@@ -365,11 +344,6 @@ local function IsTargetValid(player)
     
     local charCache = api:get_character_cache(player)
     if not charCache or not charCache.HumanoidRootPart then return false end
-    
-    -- ForceField Check Removed to allow Loop Bag / Spawn Camp
-    -- if player.Character:FindFirstChildOfClass("ForceField") then
-    --     return false
-    -- end
     
     return true
 end
@@ -439,7 +413,6 @@ local function UseBag()
     local spamRate = Options.BagSpamRate and Options.BagSpamRate.Value or 5
     local spamDelay = 1 / spamRate
     
-    -- Activation Debounce
     if currentTime - State.LastBagAttempt < spamDelay then
         return false
     end
@@ -454,37 +427,25 @@ local function UseBag()
                 State.LastBuyTime = currentTime
                 
                 task.spawn(function()
-                    DebugLog("Attempting to buy bag...")
+                    DebugLog("Buying bag...")
                     api:buy_item("brownbag", false, true)
-                    DebugLog("Buy request sent.")
                     task.wait(1.2)
+                    State.BuyingBag = false
                 end)
-            end
-        else
-            if not api:can_desync() then
-                DebugLog("Cannot desync (cannot buy bag)")
             end
         end
         return false
     end
     
     if Bag.Parent == LocalPlayer.Backpack then
-        -- Equip Debounce (Fix for tool error kick)
-        local equipDelay = Options.EquipCooldown and Options.EquipCooldown.Value or 0.5
-        
-        if currentTime - State.LastEquipAttempt < equipDelay then
-            return false
+        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid:EquipTool(Bag)
+            task.wait(0.03)
         end
-        
-        DebugLog("Equipping bag via Parent...")
-        Bag.Parent = LocalPlayer.Character
-        State.LastEquipAttempt = currentTime
-        task.wait(0.1) 
-        return false -- Return false to wait for next loop (equip takes time)
     end
     
     if Bag.Parent == LocalPlayer.Character then
-        DebugLog("Activating bag...")
         Bag:Activate()
         State.LastBagAttempt = currentTime
         State.BagAttempts = State.BagAttempts + 1
@@ -538,6 +499,7 @@ task.spawn(function()
         end
         
         -- Get target
+        -- Get target
         local NewTarget = nil
         
         -- 1. Check Dropdown (Batch Priority: All Unbagged > Then Kill)
@@ -586,19 +548,38 @@ task.spawn(function()
         end
         
         -- 2. Silent Aim / Fallback (Priority #2)
-        -- We prioritize the user's immediate aim/focus over the background server bagger.
-        if not NewTarget then
-            if Toggles.SilentAimOnly and Toggles.SilentAimOnly.Value then
-                NewTarget = api:get_target("silent")
-            end
+        -- Only check silent aim if the toggle is ENABLED
+        if not NewTarget and Toggles.SilentAimOnly and Toggles.SilentAimOnly.Value then
+            NewTarget = api:get_target("silent") or api:get_target("aimbot")
         end
         
-        -- 3. Server Bagging Auto-Loop (Priority #3)
-        -- Server bagging removed
-        
-        -- 3. Proximity Fallback (Removed/Disabled by Strict Logic)
-        -- We only use proximity/aimbot if you explicitly wanted it, but user requested strict "Silent Aim Only" or nothing.
-        -- So if toggle is OFF, NewTarget remains nil here.
+        -- 3. Proximity Fallback - REMOVED per user request
+        -- Script will ONLY bag if target is in Dropdown OR if SilentAim toggle is ON.
+        -- if not NewTarget then
+        --     local MyChar = LocalPlayer.Character
+        --     if MyChar then
+        --         local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+        --         if MyRoot then
+        --             local ClosestDist = 150
+        --             local ClosestPlr = nil
+        --             
+        --             for _, Player in ipairs(Players:GetPlayers()) do
+        --                 if Player ~= LocalPlayer and IsTargetValid(Player) then
+        --                     local charCache = api:get_character_cache(Player)
+        --                     if charCache and charCache.HumanoidRootPart then
+        --                         local Dist = (charCache.HumanoidRootPart.Position - MyRoot.Position).Magnitude
+        --                         if Dist < ClosestDist then
+        --                             ClosestDist = Dist
+        --                             ClosestPlr = Player
+        --                         end
+        --                     end
+        --                 end
+        --             end
+        --             
+        --             NewTarget = ClosestPlr
+        --         end
+        --     end
+        -- end
         
         -- Target changed
         if State.Target ~= NewTarget then
@@ -609,12 +590,9 @@ task.spawn(function()
             State.WasJustBagged = false
             State.ShouldVoid = false
             State.IsKnocked = false
-            State.BagStartTime = tick()
             
             if NewTarget then
                 DebugLog("Target: " .. NewTarget.Name)
-            else
-                DebugLog("No Target")
             end
         end
         
@@ -635,9 +613,6 @@ task.spawn(function()
                     State.LastBagSuccess = currentTime
                     State.StrategyFailCount = 0
                     State.WasJustBagged = true
-                    
-                    local elapsed = currentTime - State.BagStartTime
-                    api:notify(string.format("Bagged %s in %.2fs!", State.Target.Name, elapsed), 3)
                     DebugLog("Bagged!")
                 end
                 
@@ -777,24 +752,13 @@ local PhysicsConnection = api:add_connection(RunService.Heartbeat:Connect(functi
             return
         end
         
-            end)
-            return
-        end
-        
         -- If in bag mode or pre-fire mode, glue and position
         if State.Mode == "bagging" or State.Mode == "prefire_bagging" then
             pcall(function()
                 sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
             end)
             
-            local GlueCFrame
-            -- User Requested: "when target is dead void" (assuming bagged/dead implies voiding them)
-            if State.IsBagged or (State.Target and State.Target.Character and State.Target.Character:FindFirstChild("Humanoid") and State.Target.Character.Humanoid.Health <= 0) then
-                GlueCFrame = VoidCFrame
-            else
-                GlueCFrame = GetBagPosition(TargetRoot)
-            end
-            
+            local GlueCFrame = GetBagPosition(TargetRoot)
             api:set_desync_cframe(GlueCFrame)
         end
     end
