@@ -395,9 +395,9 @@ local function TargetHasGun(target)
     if not tool:FindFirstChild("Handle") then return false end
     
     local gunPatterns = {
-        "Shotgun", "Rifle", "Revolver", "SMG", 
-        "AR", "AK47", "LMG", "TacticalShotgun",
-        "Double-Barrel", "Silencer"
+        "Shotgun", "Rifle", "Pistol", "Revolver", "SMG", 
+        "AR", "AK", "LMG", "Sniper", "TacticalShotgun",
+        "Double%-Barrel", "Silencer"
     }
     
     for _, pattern in ipairs(gunPatterns) do
