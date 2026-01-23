@@ -63,16 +63,16 @@ Main_Tab:AddToggle("only_when_target", {
 })
 
 Main_Tab:AddToggle("always_face_target", {
-    Text = "Always Face Target",
+    Text = "Lock to Target Rotation",
     Default = false,
-    Tooltip = "Rotate your character to face the target"
+    Tooltip = "Stick to target's rotation (rotates with them)"
 })
 
 Main_Tab:AddDropdown("face_mode", {
-    Text = "Face Mode",
+    Text = "Rotation Mode",
     Default = 1,
     Values = {"Face Target", "Behind Target", "Side View Left", "Side View Right"},
-    Tooltip = "Direction to face relative to target"
+    Tooltip = "Which direction to face relative to target"
 })
 
 Main_Tab:AddDivider()
@@ -197,7 +197,7 @@ Rotation_Tab:AddSlider("glue_pitch", {
     Rounding = 1,
     Compact = true,
     Callback = function(value)
-        local _, y, z = GlueAngle:ToEulerAnglesYXZ()
+        local _, y, z = GlueAngle:ToEulerAngles YXZ()
         GlueAngle = CFrame.Angles(math.rad(value), y, z)
     end
 })
@@ -239,7 +239,7 @@ Rotation_Tab:AddDropdown("preset_rotations", {
             GlueAngle = CFrame.Angles(-math.pi / 2, 0, 0)
             Options['glue_pitch']:SetValue(-90)
             Options['glue_yaw']:SetValue(0)
-            Options['glue_roll']:SetValue(0)
+            Options[' glue_roll']:SetValue(0)
         elseif value == "Face Up" then
             GlueAngle = CFrame.Angles(math.pi / 2, 0, 0)
             Options['glue_pitch']:SetValue(90)
@@ -322,37 +322,34 @@ local function EnableGlue(target)
             sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", TargetPart)
         end)
         
-        -- Calculate base desync CFrame
-        local desyncCFrame = CFrame.new(TargetPart.Position + GlueOffset) * GlueAngle
+        -- Calculate base position
+        local basePos = TargetPart.Position + GlueOffset
+        local desyncCFrame
         
-        -- Apply "Always Face Target" rotation if enabled
+        -- Apply "Lock to Target Rotation" if enabled
         if Toggles['always_face_target'] and Toggles['always_face_target'].Value then
-            local myRoot = LocalPlayer.Character.HumanoidRootPart
-            local myPos = myRoot.Position
-            local targetPos = TargetPart.Position
             local faceMode = Options['face_mode'].Value
             
-            local lookDirection
             if faceMode == "Face Target" then
-                -- Look directly at target
-                lookDirection = (targetPos - myPos).Unit
+                -- Face towards the target (look at them)
+                local lookDirection = (TargetPart.Position - basePos).Unit
+                desyncCFrame = CFrame.lookAt(basePos, basePos + lookDirection)
             elseif faceMode == "Behind Target" then
-                -- Look in same direction as target (behind them)
-                lookDirection = TargetPart.CFrame.LookVector
+                -- Match target's exact rotation (facing same direction)
+                local targetRotation = TargetPart.CFrame - TargetPart.CFrame.Position
+                desyncCFrame = CFrame.new(basePos) * targetRotation
             elseif faceMode == "Side View Left" then
-                -- Look from left side
-                lookDirection = TargetPart.CFrame.RightVector
+                -- Rotate 90 degrees left from target's rotation
+               local targetRotation = (TargetPart.CFrame - TargetPart.CFrame.Position) * CFrame.Angles(0, math.rad(90), 0)
+                desyncCFrame = CFrame.new(basePos) * targetRotation
             elseif faceMode == "Side View Right" then
-                -- Look from right side
-                lookDirection = -TargetPart.CFrame.RightVector
+                -- Rotate 90 degrees right from target's rotation
+                local targetRotation = (TargetPart.CFrame - TargetPart.CFrame.Position) * CFrame.Angles(0, math.rad(-90), 0)
+                desyncCFrame = CFrame.new(basePos) * targetRotation
             end
-            
-            -- Create rotation CFrame to face the direction
-            if lookDirection then
-                local facingCFrame = CFrame.lookAt(desyncCFrame.Position, desyncCFrame.Position + lookDirection)
-                -- Preserve the pitch/roll from GlueAngle but apply new facing direction
-                desyncCFrame = facingCFrame * CFrame.Angles(GlueAngle:ToEulerAnglesYXZ())
-            end
+        else
+            -- Use custom GlueAngle rotation
+            desyncCFrame = CFrame.new(basePos) * GlueAngle
         end
         
         api:set_desync_cframe(desyncCFrame)
