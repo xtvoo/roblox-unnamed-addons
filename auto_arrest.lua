@@ -299,12 +299,11 @@ local function GetWantedLevel(player)
 end
 
 local function IsKnocked(player)
-    if not player then return false end
+    if not player or not player.Character then return false end
     
-    local statusCache = api:get_status_cache(player)
-    if not statusCache then return false end
-    
-    return statusCache["K.O"] == true
+    local bodyEffects = player.Character:FindFirstChild("BodyEffects")
+    local ko = bodyEffects and bodyEffects:FindFirstChild("K.O")
+    return ko and ko.Value == true
 end
 
 local function IsDead(player)
@@ -347,44 +346,35 @@ local function CanArrestTarget(player)
 end
 
 -- ========== ARREST LOGIC ==========
-local function PerformArrest(target)
-    if not target or not target.Character then return false end
-    
-    local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-    if not targetRoot then return false end
-    
-    local myChar = LocalPlayer.Character
-    if not myChar then return false end
-    
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return false end
-    
-    -- Get arrest offset
+local function GetArrestPosition(targetRoot)
+    -- Get arrest offset (same system as auto bag)
     local offsetX = Options.ArrestOffsetX and Options.ArrestOffsetX.Value or 0
     local offsetY = Options.ArrestOffsetY and Options.ArrestOffsetY.Value or 2
     local offsetZ = Options.ArrestOffsetZ and Options.ArrestOffsetZ.Value or 0
     local offset = Vector3.new(offsetX, offsetY, offsetZ)
     
-    -- Stick to target using PhysicsRepRootPart
-    pcall(function()
-        sethiddenproperty(myRoot, "PhysicsRepRootPart", targetRoot)
-    end)
+    -- Position at offset from target
+    return CFrame.new(targetRoot.Position + offset)
+end
+
+local function PerformArrest()
+    -- Simple: Just equip cuffs and activate
+    -- Positioning is handled by the physics loop
     
-    -- Position above target for arrest
-    local arrestCFrame = CFrame.new(targetRoot.Position + offset)
-    api:set_desync_cframe(arrestCFrame)
+    if not EquipCuffs() then
+        DebugLog("Failed to equip cuffs")
+        return false
+    end
     
-    -- Equip cuffs
-    if EquipCuffs() then
-        -- Arrest by activating the cuff tool (Da Hood uses client-side arrest)
-        task.wait(0.1)
-        local cuffs = GetCuffs()
-        if cuffs and cuffs.Parent == LocalPlayer.Character then
-            cuffs:Activate()
-            DebugLog("Activated cuffs on " .. target.Name)
-            State.ArrestAttempts = State.ArrestAttempts + 1
-        end
-        
+    -- Wait briefly for equip
+    task.wait(0.05)
+    
+    -- Activate cuffs (press once)
+    local cuffs = GetCuffs()
+    if cuffs and cuffs.Parent == LocalPlayer.Character then
+        cuffs:Activate()
+        DebugLog("Activated cuffs")
+        State.ArrestAttempts = State.ArrestAttempts + 1
         return true
     end
     
@@ -528,7 +518,9 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             -- Disable ragebot and clear target
             UpdateTargetUI("nil")
             api:set_ragebot(false)
-            PerformArrest(Target)
+            
+            -- Perform arrest (physics loop handles positioning)
+            PerformArrest()
         elseif not isKnocked then
             -- Kill target first - set as ragebot target
             State.Mode = "killing_for_arrest"
@@ -552,12 +544,46 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             
             UpdateTargetUI("nil")
             api:set_ragebot(false)
-            PerformArrest(Target)
+            
+            -- Perform arrest (physics loop handles positioning)
+            PerformArrest()
         else
             -- Use ragebot to knock them - set as target
             State.Mode = "knocking_for_arrest"
             UpdateTargetUI(Target.Name)
             api:set_ragebot(true)
+        end
+    end
+end))
+
+-- ========== PHYSICS LOOP (Same as Auto Bag) ==========
+api:add_connection(RunService.Heartbeat:Connect(function()
+    if not (Toggles.ArrestEnabled and Toggles.ArrestEnabled.Value) or not State.Target then
+        return
+    end
+    
+    local MyChar = LocalPlayer.Character
+    if not MyChar then return end
+    local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
+    
+    local TargetChar = State.Target.Character
+    if not TargetChar then return end
+    local TargetRoot = TargetChar:FindFirstChild("HumanoidRootPart")
+    
+    if MyRoot and TargetRoot then
+        -- If arresting, stick to target and update position continuously
+        if State.Mode == "arresting" then
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
+            end)
+            
+            local ArrestCFrame = GetArrestPosition(TargetRoot)
+            api:set_desync_cframe(ArrestCFrame)
+        else
+            -- Unglue when not arresting
+            pcall(function()
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", nil)
+            end)
         end
     end
 end))
