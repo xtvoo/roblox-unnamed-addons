@@ -18,7 +18,7 @@ local ArrestToggle = Main:AddToggle("ArrestEnabled", {
 })
 
 Main:AddDropdown("ArrestMode", {
-    Values = {"Instant Kill+Arrest", "Bag+Knock+Arrest"},
+    Values = {"Instant Kill+Arrest", "Bag+Knock+Arrest", "Wait for Knock"},
     Default = 1,
     Text = "Arrest Mode",
     Tooltip = "Instant = Kill then arrest | Bag = Bag, knock, then arrest"
@@ -632,6 +632,34 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             State.Mode = "knocking_for_arrest"
             UpdateTargetUI(Target.Name)
             SetRagebot(true)
+        end
+        
+    elseif arrestMode == "Wait for Knock" then
+        -- MODE 3: Passive - Wait for them to get knocked
+        UpdateTargetUI("nil")
+        SetRagebot(false) -- Ensure ragebot is OFF
+        
+        local isKnocked = IsKnocked(Target)
+        
+        if isKnocked then
+             if not State.IsArresting then
+                State.Mode = "arresting"
+                State.IsArresting = true
+                State.KnockedTime = tick()
+                
+                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                    api:notify("🚔 Passive Arrest: " .. Target.Name, 2)
+                end
+            end
+            
+            -- Wait delay before arresting
+            local delay = Options.ArrestDelay and Options.ArrestDelay.Value or 0.5
+            if tick() - State.KnockedTime >= delay then
+                PerformArrest()
+            end
+        else
+            State.Mode = "idle"
+            State.IsArresting = false
         end
     end
 end))
