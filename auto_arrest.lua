@@ -115,7 +115,11 @@ local State = {
     LastPoliceCheck = 0,
     LastWantedCheck = 0,
     CachedIsPolice = false,
-    CachedWantedLevel = 0
+    CachedWantedLevel = 0,
+    
+    -- State caching to prevent spam
+    LastRageTarget = nil,
+    LastRageEnabled = nil
 }
 
 -- ========== PLAYER LIST MANAGEMENT ==========
@@ -203,11 +207,21 @@ local function DebugLog(message)
 end
 
 local function UpdateTargetUI(name)
+    -- Only update if changed
+    if State.LastRageTarget == name then return end
+    State.LastRageTarget = name
+    
     local rageTarget = api:get_ui_object("ragebot_targets")
     if rageTarget then
         rageTarget:SetValue(name)
         DebugLog("Set ragebot target: " .. name)
     end
+end
+
+local function SetRagebot(enabled)
+    if State.LastRageEnabled == enabled then return end
+    State.LastRageEnabled = enabled
+    api:set_ragebot(enabled)
 end
 
 local function IsPolice()
@@ -485,7 +499,7 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         
         -- Kill them normally with ragebot - set target
         UpdateTargetUI(Target.Name)
-        api:set_ragebot(true)
+        SetRagebot(true)
         State.Mode = "killing_low_wanted"
         return
     end
@@ -517,16 +531,19 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             
             -- Disable ragebot and clear target
             UpdateTargetUI("nil")
-            api:set_ragebot(false)
+            SetRagebot(false)
             
             -- Perform arrest (physics loop handles positioning)
             PerformArrest()
         elseif not isKnocked then
             -- Kill target first - set as ragebot target
-            State.Mode = "killing_for_arrest"
+            if State.Mode ~= "killing_for_arrest" then
+                State.Mode = "killing_for_arrest"
+                DebugLog("Killing target for arrest: " .. Target.Name)
+            end
+            
             UpdateTargetUI(Target.Name)
-            api:set_ragebot(true)
-            DebugLog("Killing target for arrest: " .. Target.Name)
+            SetRagebot(true)
         end
         
     elseif arrestMode == "Bag+Knock+Arrest" then
@@ -551,7 +568,7 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             -- Use ragebot to knock them - set as target
             State.Mode = "knocking_for_arrest"
             UpdateTargetUI(Target.Name)
-            api:set_ragebot(true)
+            SetRagebot(true)
         end
     end
 end))
