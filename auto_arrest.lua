@@ -109,7 +109,13 @@ local State = {
     IsArresting = false,
     LastArrestTime = 0,
     Mode = "idle",
-    ArrestAttempts = 0
+    ArrestAttempts = 0,
+    
+    -- Performance throttling
+    LastPoliceCheck = 0,
+    LastWantedCheck = 0,
+    CachedIsPolice = false,
+    CachedWantedLevel = 0
 }
 
 -- ========== PLAYER LIST MANAGEMENT ==========
@@ -205,16 +211,28 @@ local function UpdateTargetUI(name)
 end
 
 local function IsPolice()
+    -- Throttle: Only check every 0.5 seconds
+    local currentTime = tick()
+    if currentTime - State.LastPoliceCheck < 0.5 then
+        return State.CachedIsPolice
+    end
+    
+    State.LastPoliceCheck = currentTime
+    
     -- Check if player is police
     local character = LocalPlayer.Character
-    if not character then return false end
+    if not character then 
+        State.CachedIsPolice = false
+        return false 
+    end
     
     -- Method 1: Check for police badge/uniform
     local policeCheck = character:FindFirstChild("PoliceShirt") or 
                        character:FindFirstChild("PolicePants") or
                        Workspace.Ignored["Join/Leave"]:FindFirstChild("ClickDetector")
     
-    return policeCheck ~= nil
+    State.CachedIsPolice = policeCheck ~= nil
+    return State.CachedIsPolice
 end
 
 local function GetCuffs()
@@ -250,36 +268,33 @@ local function EquipCuffs()
 end
 
 local function GetWantedLevel(player)
-    -- Get player's wanted level from their overhead GUI or leaderstats
-    if not player then return 0 end
+    -- Throttle: Only check every 0.5 seconds for the same player
+    if State.Target == player then
+        local currentTime = tick()
+        if currentTime - State.LastWantedCheck < 0.5 then
+            return State.CachedWantedLevel
+        end
+        State.LastWantedCheck = currentTime
+    end
     
-    -- Method 1: Check leaderstats
+    -- Get player's wanted level from their overhead GUI or leaderstats
+    if not player then 
+        State.CachedWantedLevel = 0
+        return 0 
+    end
+    
+    -- Method 1: Check leaderstats (faster)
     local leaderstats = player:FindFirstChild("leaderstats")
     if leaderstats then
         local wanted = leaderstats:FindFirstChild("Wanted") or leaderstats:FindFirstChild("Bounty")
         if wanted and wanted.Value then
-            return tonumber(wanted.Value) or 0
+            local wantedVal = tonumber(wanted.Value) or 0
+            State.CachedWantedLevel = wantedVal
+            return wantedVal
         end
     end
     
-    -- Method 2: Check character overhead
-    if player.Character then
-        local head = player.Character:FindFirstChild("Head")
-        if head then
-            for _, gui in ipairs(head:GetChildren()) do
-                if gui:IsA("BillboardGui") then
-                    local wantedLabel = gui:FindFirstChildWhichIsA("TextLabel", true)
-                    if wantedLabel and wantedLabel.Text:find("Wanted") then
-                        local wantedNum = wantedLabel.Text:match("%d+")
-                        if wantedNum then
-                            return tonumber(wantedNum) or 0
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
+    State.CachedWantedLevel = 0
     return 0
 end
 
