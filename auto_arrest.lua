@@ -34,6 +34,16 @@ Main:AddSlider("MinWanted", {
     Tooltip = "Only arrest targets with this wanted level or higher"
 })
 
+Settings:AddSlider("KnockDelay", {
+    Text = "Knock Wait Delay",
+    Default = 0.2,
+    Min = 0,
+    Max = 2,
+    Rounding = 2,
+    Suffix = " sec",
+    Tooltip = "Wait time after knock before arresting"
+})
+
 Settings:AddSlider("ArrestOffsetX", {
     Text = "Arrest Offset X",
     Default = 0,
@@ -83,7 +93,8 @@ local State = {
     IsArresting = false,
     LastArrestTime = 0,
     Mode = "idle",
-    ArrestAttempts = 0
+    ArrestAttempts = 0,
+    KnockedTime = 0  -- Track when target got knocked
 }
 
 -- ========== HELPER FUNCTIONS ==========
@@ -333,26 +344,40 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         if isDead then
             State.Mode = "idle"
             State.IsArresting = false
+            State.KnockedTime = 0
             DebugLog("Target died before arrest")
             return
         end
         
-        if isKnocked and not State.IsArresting then
-            -- Target is knocked - arrest them!
-            State.Mode = "arresting"
-            State.IsArresting = true
-            
-            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
+        if isKnocked then
+            -- Track when they got knocked
+            if State.KnockedTime == 0 then
+                State.KnockedTime = tick()
+                DebugLog("Target knocked! Waiting for arrest...")
             end
             
-            -- Disable ragebot
-            api:set_ragebot(false)
+            -- Wait for knock delay before arresting
+            local knockDelay = Options.KnockDelay and Options.KnockDelay.Value or 0.2
+            local timeSinceKnock = tick() - State.KnockedTime
             
-            -- Perform arrest
-            PerformArrest(Target)
-        elseif not isKnocked then
-            -- Kill target first
+            if timeSinceKnock >= knockDelay and not State.IsArresting then
+                -- Target has been knocked long enough - arrest them!
+                State.Mode = "arresting"
+                State.IsArresting = true
+                
+                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                    api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
+                end
+                
+                -- Disable ragebot
+                api:set_ragebot(false)
+                
+                -- Perform arrest
+                PerformArrest(Target)
+            end
+        else
+            -- Not knocked yet - reset timer and kill
+            State.KnockedTime = 0
             State.Mode = "killing_for_arrest"
             api:set_ragebot(true)
             DebugLog("Killing target for arrest: " .. Target.Name)
@@ -360,22 +385,34 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         
     elseif arrestMode == "Bag+Knock+Arrest" then
         -- MODE 2: Bag, knock, then arrest
-        -- TODO: Integrate with bag system
-        -- For now, use same logic as instant mode
+        -- TODO: Integrate with bag system for full bag+knock+arrest combo
         local isKnocked = IsKnocked(Target)
         
-        if isKnocked and not State.IsArresting then
-            State.Mode = "arresting"
-            State.IsArresting = true
-            
-            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
+        if isKnocked then
+            -- Track when they got knocked
+            if State.KnockedTime == 0 then
+                State.KnockedTime = tick()
+                DebugLog("Target knocked (Bag Mode)! Waiting...")
             end
             
-            api:set_ragebot(false)
-            PerformArrest(Target)
+            -- Wait for knock delay
+            local knockDelay = Options.KnockDelay and Options.KnockDelay.Value or 0.2
+            local timeSinceKnock = tick() - State.KnockedTime
+            
+            if timeSinceKnock >= knockDelay and not State.IsArresting then
+                State.Mode = "arresting"
+                State.IsArresting = true
+                
+                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                    api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
+                end
+                
+                api:set_ragebot(false)
+                PerformArrest(Target)
+            end
         else
-            -- Use ragebot to knock them
+            -- Not knocked yet - reset timer and knock them
+            State.KnockedTime = 0
             State.Mode = "knocking_for_arrest"
             api:set_ragebot(true)
         end
