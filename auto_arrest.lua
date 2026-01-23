@@ -543,13 +543,19 @@ api:add_connection(RunService.Heartbeat:Connect(function()
     local canArrest, reason = CanArrestTarget(Target)
     if not canArrest then
         if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-            api:notify("⚠️ " .. Target.Name .. ": " .. reason .. " - Killing normally", 2)
+            api:notify("⚠️ " .. Target.Name .. ": " .. reason .. " - Waiting...", 2)
         end
         
-        -- Kill them normally with ragebot - set target
-        UpdateTargetUI(Target.Name)
-        SetRagebot(true)
-        State.Mode = "killing_low_wanted"
+        -- Only kill if NOT in passive mode
+        local mode = Options.ArrestMode and Options.ArrestMode.Value
+        if mode ~= "Wait for Knock" then
+             UpdateTargetUI(Target.Name)
+             SetRagebot(true)
+             State.Mode = "killing_low_wanted"
+        else
+             UpdateTargetUI("nil")
+             SetRagebot(false)
+        end
         return
     end
     
