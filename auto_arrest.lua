@@ -24,6 +24,13 @@ Main:AddDropdown("ArrestMode", {
     Tooltip = "Instant = Kill then arrest | Bag = Bag, knock, then arrest"
 })
 
+Main:AddDropdown("TargetType", {
+    Values = {"Silent Aim", "Dropdown List", "Both"},
+    Default = 1,
+    Text = "Target Source",
+    Tooltip = "Where to get targets from"
+})
+
 Main:AddSlider("MinWanted", {
     Text = "Min Wanted Level",
     Default = 100,
@@ -32,16 +39,6 @@ Main:AddSlider("MinWanted", {
     Rounding = 0,
     Suffix = " wanted",
     Tooltip = "Only arrest targets with this wanted level or higher"
-})
-
-Settings:AddSlider("KnockDelay", {
-    Text = "Knock Wait Delay",
-    Default = 0.2,
-    Min = 0,
-    Max = 2,
-    Rounding = 2,
-    Suffix = " sec",
-    Tooltip = "Wait time after knock before arresting"
 })
 
 Settings:AddSlider("ArrestOffsetX", {
@@ -87,15 +84,110 @@ Settings:AddToggle("DebugMode", {
     Default = false
 })
 
+-- Multi-Target Dropdown
+local PlayerDropdown = Main:AddDropdown("TargetList", {
+    Values = {},
+    Default = {},
+    Multi = true,
+    Text = "Select Targets",
+    Tooltip = "Specific players to arrest"
+})
+
+-- Player Search Input
+Main:AddInput("PlayerSearchInput", {
+    Default = "",
+    Numeric = false,
+    Finished = true,
+    Text = "Add Target (User/Display)",
+    Tooltip = "Type name to auto-select player",
+    Placeholder = "Username or Display Name",
+})
+
 -- ========== STATE ==========
 local State = {
     Target = nil,
     IsArresting = false,
     LastArrestTime = 0,
     Mode = "idle",
-    ArrestAttempts = 0,
-    KnockedTime = 0  -- Track when target got knocked
+    ArrestAttempts = 0
 }
+
+-- ========== PLAYER LIST MANAGEMENT ==========
+local function GetPlayerFormat(player)
+    return string.format("%s (@%s)", player.DisplayName, player.Name)
+end
+
+local function UpdatePlayerList()
+    local values = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(values, GetPlayerFormat(player))
+        end
+    end
+    PlayerDropdown:SetValues(values)
+end
+
+api:add_connection(Players.PlayerAdded:Connect(UpdatePlayerList))
+api:add_connection(Players.PlayerRemoving:Connect(function() task.delay(0.1, UpdatePlayerList) end))
+UpdatePlayerList()
+
+Options.PlayerSearchInput:OnChanged(function(val)
+    if not val or type(val) ~= "string" then return end
+    
+    val = val:match("^%s*(.-)%s*$")
+    if val == "" then return end
+    
+    local bestMatch = nil
+    local bestScore = 0
+    local lowerVal = val:lower()
+    
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local pName = p.Name:lower()
+            local pDisplay = p.DisplayName:lower()
+            
+            local currentScore = 0
+            
+            if pName == lowerVal then currentScore = 3
+            elseif pName:find("^" .. lowerVal, 1, false) then currentScore = 2
+            elseif pName:find(lowerVal, 1, true) then currentScore = 1
+            end
+            
+            if pDisplay == lowerVal then currentScore = math.max(currentScore, 3)
+            elseif pDisplay:find("^" .. lowerVal, 1, false) then currentScore = math.max(currentScore, 2)
+            elseif pDisplay:find(lowerVal, 1, true) then currentScore = math.max(currentScore, 1)
+            end
+            
+            if currentScore > bestScore then
+                bestMatch = p
+                bestScore = currentScore
+            elseif currentScore == bestScore and bestScore > 0 then
+                if bestMatch and #p.Name < #bestMatch.Name then
+                    bestMatch = p
+                end
+            end
+        end
+    end
+    
+    if bestMatch then
+        local found = bestMatch
+        local key = GetPlayerFormat(found)
+        local current = Options.TargetList.Value
+        
+        if not current[key] then
+            current[key] = true
+            Options.TargetList:SetValue(current)
+            api:notify("Added " .. found.Name .. " to arrest targets!", 2)
+        else
+            api:notify(found.Name .. " is already selected.", 2)
+        end
+        
+        Options.PlayerSearchInput:SetValue("")
+    else
+        api:notify("No player found matching: " .. val, 2)
+        Options.PlayerSearchInput:SetValue("")
+    end
+end)
 
 -- ========== HELPER FUNCTIONS ==========
 local function DebugLog(message)
@@ -303,8 +395,59 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         return
     end
     
-    -- Get target from silent aim/aimbot
-    local Target = api:get_target("silent") or api:get_target("aimbot")
+    -- Get target based on target type
+    local targetType = Options.TargetType and Options.TargetType.Value or "Silent Aim"
+    local Target = nil
+    
+    if targetType == "Silent Aim" then
+        -- Only use silent aim/aimbot
+        Target = api:get_target("silent") or api:get_target("aimbot")
+        
+    elseif targetType == "Dropdown List" then
+        -- Only use dropdown targets
+        if Options.TargetList then
+            local selected_entries = Options.TargetList.Value
+            
+            for name_str, is_selected in pairs(selected_entries) do
+                if is_selected then
+                    local username = name_str:match("@(.+)")
+                    if username then
+                        username = username:gsub("%)", "")
+                        local p = Players:FindFirstChild(username)
+                        if p and IsTargetValid(p) then
+                            Target = p
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        
+    elseif targetType == "Both" then
+        -- Try dropdown first, then silent aim
+        if Options.TargetList then
+            local selected_entries = Options.TargetList.Value
+            
+            for name_str, is_selected in pairs(selected_entries) do
+                if is_selected then
+                    local username = name_str:match("@(.+)")
+                    if username then
+                        username = username:gsub("%)", "")
+                        local p = Players:FindFirstChild(username)
+                        if p and IsTargetValid(p) then
+                            Target = p
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Fallback to silent aim
+        if not Target then
+            Target = api:get_target("silent") or api:get_target("aimbot")
+        end
+    end
     
     if not Target then
         State.Target = nil
@@ -349,35 +492,19 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             return
         end
         
-        if isKnocked then
-            -- Track when they got knocked
-            if State.KnockedTime == 0 then
-                State.KnockedTime = tick()
-                DebugLog("Target knocked! Waiting for arrest...")
+        if isKnocked and not State.IsArresting then
+            -- Target is knocked - arrest them immediately!
+            State.Mode = "arresting"
+            State.IsArresting = true
+            
+            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
             end
             
-            -- Wait for knock delay before arresting
-            local knockDelay = Options.KnockDelay and Options.KnockDelay.Value or 0.2
-            local timeSinceKnock = tick() - State.KnockedTime
-            
-            if timeSinceKnock >= knockDelay and not State.IsArresting then
-                -- Target has been knocked long enough - arrest them!
-                State.Mode = "arresting"
-                State.IsArresting = true
-                
-                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                    api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
-                end
-                
-                -- Disable ragebot
-                api:set_ragebot(false)
-                
-                -- Perform arrest
-                PerformArrest(Target)
-            end
-        else
-            -- Not knocked yet - reset timer and kill
-            State.KnockedTime = 0
+            api:set_ragebot(false)
+            PerformArrest(Target)
+        elseif not isKnocked then
+            -- Kill target first
             State.Mode = "killing_for_arrest"
             api:set_ragebot(true)
             DebugLog("Killing target for arrest: " .. Target.Name)
@@ -388,31 +515,18 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         -- TODO: Integrate with bag system for full bag+knock+arrest combo
         local isKnocked = IsKnocked(Target)
         
-        if isKnocked then
-            -- Track when they got knocked
-            if State.KnockedTime == 0 then
-                State.KnockedTime = tick()
-                DebugLog("Target knocked (Bag Mode)! Waiting...")
+        if isKnocked and not State.IsArresting then
+            State.Mode = "arresting"
+            State.IsArresting = true
+            
+            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
             end
             
-            -- Wait for knock delay
-            local knockDelay = Options.KnockDelay and Options.KnockDelay.Value or 0.2
-            local timeSinceKnock = tick() - State.KnockedTime
-            
-            if timeSinceKnock >= knockDelay and not State.IsArresting then
-                State.Mode = "arresting"
-                State.IsArresting = true
-                
-                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                    api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
-                end
-                
-                api:set_ragebot(false)
-                PerformArrest(Target)
-            end
+            api:set_ragebot(false)
+            PerformArrest(Target)
         else
-            -- Not knocked yet - reset timer and knock them
-            State.KnockedTime = 0
+            -- Use ragebot to knock them
             State.Mode = "knocking_for_arrest"
             api:set_ragebot(true)
         end
