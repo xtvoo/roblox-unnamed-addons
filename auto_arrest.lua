@@ -108,19 +108,19 @@ local function UpdateMenuVisibility()
     local enabled = Toggles.ArrestEnabled.Value
     
     -- Main Group
-    Options.ArrestMode:SetVisible(enabled)
-    Options.TargetType:SetVisible(enabled)
-    Options.MinWanted:SetVisible(enabled)
-    Options.TargetList:SetVisible(enabled)
-    Options.PlayerSearchInput:SetVisible(enabled)
+    if Options.ArrestMode then Options.ArrestMode.Visible = enabled end
+    if Options.TargetType then Options.TargetType.Visible = enabled end
+    if Options.MinWanted then Options.MinWanted.Visible = enabled end
+    if Options.TargetList then Options.TargetList.Visible = enabled end
+    if Options.PlayerSearchInput then Options.PlayerSearchInput.Visible = enabled end
     
     -- Settings Group
-    Options.ArrestOffsetX:SetVisible(enabled)
-    Options.ArrestOffsetY:SetVisible(enabled)
-    Options.ArrestOffsetZ:SetVisible(enabled)
-    Toggles.AutoEquipCuffs:SetVisible(enabled)
-    Toggles.NotifyArrest:SetVisible(enabled)
-    Toggles.DebugMode:SetVisible(enabled)
+    if Options.ArrestOffsetX then Options.ArrestOffsetX.Visible = enabled end
+    if Options.ArrestOffsetY then Options.ArrestOffsetY.Visible = enabled end
+    if Options.ArrestOffsetZ then Options.ArrestOffsetZ.Visible = enabled end
+    if Toggles.AutoEquipCuffs then Toggles.AutoEquipCuffs.Visible = enabled end
+    if Toggles.NotifyArrest then Toggles.NotifyArrest.Visible = enabled end
+    if Toggles.DebugMode then Toggles.DebugMode.Visible = enabled end
 end
 
 Toggles.ArrestEnabled:OnChanged(UpdateMenuVisibility)
