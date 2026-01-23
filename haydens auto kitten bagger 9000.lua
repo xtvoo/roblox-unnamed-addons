@@ -603,41 +603,13 @@ api:add_connection(RunService.Heartbeat:Connect(function(dt)
         end
     end
     
-    -- 2. Silent Aim / Fallback (Priority #2)
-    -- Only check if SilentAimOnly is ENABLED. If disabled, we ignore API targets and use Proximity/List.
+    -- 2. Silent Aim Target (Priority #2)
+    -- Only check if SilentAimOnly toggle is ENABLED
     if not NewTarget and (Toggles.SilentAimOnly and Toggles.SilentAimOnly.Value) then
         NewTarget = api:get_target("silent") or api:get_target("aimbot")
     end
-
     
-    -- 3. Proximity Fallback (Priority #3)
-    -- Only if SilentAimOnly is OFF
-    if not NewTarget and not (Toggles.SilentAimOnly and Toggles.SilentAimOnly.Value) then
-        local MyChar = LocalPlayer.Character
-        if MyChar then
-            local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
-            if MyRoot then
-                local ClosestDist = 150 -- Max distance
-                local ClosestPlr = nil
-                
-                for _, Player in ipairs(Players:GetPlayers()) do
-                    if Player ~= LocalPlayer and IsTargetValid(Player) then
-                        local charCache = api:get_character_cache(Player)
-                        if charCache and charCache.HumanoidRootPart then
-                            local Dist = (charCache.HumanoidRootPart.Position - MyRoot.Position).Magnitude
-                            if Dist < ClosestDist then
-                                ClosestDist = Dist
-                                ClosestPlr = Player
-                            end
-                        end
-                    end
-                end
-                
-                NewTarget = ClosestPlr
-            end
-        end
-    end
-
+    -- NO PROXIMITY FALLBACK - Only dropdown targets or silent aim targets
     
     -- RETENTION: If NewTarget is nil, but current State.Target is Dead, keep it to void them
     if not NewTarget and State.Target and IsDead(State.Target) then
