@@ -532,15 +532,6 @@ end
 -- ========== MAIN LOGIC LOOP (OPTIMIZED) ==========
 -- Using Heartbeat for frame-perfect execution instead of task.wait loop
 api:add_connection(RunService.Heartbeat:Connect(function(dt)
-    -- Global Bag Maintenance (Pre-Buy)
-    -- If SpawnCamp is on, ALWAYS ensure we have a bag, regardless of target
-    if Toggles.SpawnCamp and Toggles.SpawnCamp.Value then
-        local bag = GetBagTool()
-        if not bag then
-            TriggerBuyBag()
-        end
-    end
-    
     if not (Toggles.MasterSwitch and Toggles.MasterSwitch.Value) then
         if State.Mode ~= "idle" then
             api:set_ragebot(false)
@@ -553,6 +544,15 @@ api:add_connection(RunService.Heartbeat:Connect(function(dt)
             State.ShouldVoid = false
         end
         return
+    end
+    
+    -- Global Bag Maintenance (Pre-Buy)
+    -- If SpawnCamp is on, ALWAYS ensure we have a bag, regardless of target
+    if Toggles.SpawnCamp and Toggles.SpawnCamp.Value then
+        local bag = GetBagTool()
+        if not bag then
+            TriggerBuyBag()
+        end
     end
     
     -- Get target
