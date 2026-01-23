@@ -196,6 +196,14 @@ local function DebugLog(message)
     end
 end
 
+local function UpdateTargetUI(name)
+    local rageTarget = api:get_ui_object("ragebot_targets")
+    if rageTarget then
+        rageTarget:SetValue(name)
+        DebugLog("Set ragebot target: " .. name)
+    end
+end
+
 local function IsPolice()
     -- Check if player is police
     local character = LocalPlayer.Character
@@ -470,7 +478,8 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             api:notify("⚠️ " .. Target.Name .. ": " .. reason .. " - Killing normally", 2)
         end
         
-        -- Kill them normally with ragebot
+        -- Kill them normally with ragebot - set target
+        UpdateTargetUI(Target.Name)
         api:set_ragebot(true)
         State.Mode = "killing_low_wanted"
         return
@@ -501,11 +510,14 @@ api:add_connection(RunService.Heartbeat:Connect(function()
                 api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
             end
             
+            -- Disable ragebot and clear target
+            UpdateTargetUI("nil")
             api:set_ragebot(false)
             PerformArrest(Target)
         elseif not isKnocked then
-            -- Kill target first
+            -- Kill target first - set as ragebot target
             State.Mode = "killing_for_arrest"
+            UpdateTargetUI(Target.Name)
             api:set_ragebot(true)
             DebugLog("Killing target for arrest: " .. Target.Name)
         end
@@ -523,11 +535,13 @@ api:add_connection(RunService.Heartbeat:Connect(function()
                 api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
             end
             
+            UpdateTargetUI("nil")
             api:set_ragebot(false)
             PerformArrest(Target)
         else
-            -- Use ragebot to knock them
+            -- Use ragebot to knock them - set as target
             State.Mode = "knocking_for_arrest"
+            UpdateTargetUI(Target.Name)
             api:set_ragebot(true)
         end
     end
