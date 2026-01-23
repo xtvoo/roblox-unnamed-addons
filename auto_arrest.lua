@@ -11,7 +11,7 @@ local Tab = api:GetTab("ragebot") or api:AddTab("ragebot")
 local Main = Tab:AddLeftGroupbox("Auto Arrest - Main")
 local Settings = Tab:AddRightGroupbox("Auto Arrest - Settings")
 
-Main:AddToggle("ArrestEnabled", { 
+local ArrestToggle = Main:AddToggle("ArrestEnabled", { 
     Text = "Enable Auto Arrest", 
     Default = false,
     Tooltip = "Only works if you're police"
@@ -102,6 +102,29 @@ Main:AddInput("PlayerSearchInput", {
     Tooltip = "Type name to auto-select player",
     Placeholder = "Username or Display Name",
 })
+
+-- ========== DYNAMIC UI LOGIC ==========
+local function UpdateMenuVisibility()
+    local enabled = Toggles.ArrestEnabled.Value
+    
+    -- Main Group
+    Options.ArrestMode:SetVisible(enabled)
+    Options.TargetType:SetVisible(enabled)
+    Options.MinWanted:SetVisible(enabled)
+    Options.TargetList:SetVisible(enabled)
+    Options.PlayerSearchInput:SetVisible(enabled)
+    
+    -- Settings Group
+    Options.ArrestOffsetX:SetVisible(enabled)
+    Options.ArrestOffsetY:SetVisible(enabled)
+    Options.ArrestOffsetZ:SetVisible(enabled)
+    Toggles.AutoEquipCuffs:SetVisible(enabled)
+    Toggles.NotifyArrest:SetVisible(enabled)
+    Toggles.DebugMode:SetVisible(enabled)
+end
+
+Toggles.ArrestEnabled:OnChanged(UpdateMenuVisibility)
+task.delay(0.1, UpdateMenuVisibility) -- Init
 
 -- ========== STATE ==========
 local State = {
