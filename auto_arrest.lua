@@ -269,16 +269,18 @@ local function EquipCuffs()
         return false
     end
     
+    local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+
     if cuffs.Parent == LocalPlayer.Backpack then
-        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid:EquipTool(cuffs)
-            DebugLog("Equipped cuffs")
-            return true
-        end
+        humanoid:EquipTool(cuffs)
+        DebugLog("Equipping cuffs...")
+        return true
+    elseif cuffs.Parent == LocalPlayer.Character then
+        return true
     end
     
-    return cuffs.Parent == LocalPlayer.Character
+    return false
 end
 
 local function GetWantedLevel(player)
@@ -381,7 +383,16 @@ local function PerformArrest()
     end
     
     -- Wait briefly for equip
-    task.wait(0.05)
+    task.wait(0.2)
+    
+    -- Verify equipped
+    local cuffs = GetCuffs()
+    if not cuffs or cuffs.Parent ~= LocalPlayer.Character then
+        DebugLog("Cuffs not equipped after wait, retrying...")
+        EquipCuffs()
+        task.wait(0.1)
+        cuffs = GetCuffs()
+    end
     
     -- Activate cuffs (press once)
     local cuffs = GetCuffs()
@@ -583,18 +594,21 @@ api:add_connection(RunService.Heartbeat:Connect(function()
     if not MyChar then return end
     local MyRoot = MyChar:FindFirstChild("HumanoidRootPart")
     
+    
     local TargetChar = State.Target.Character
     if not TargetChar then return end
-    local TargetRoot = TargetChar:FindFirstChild("HumanoidRootPart")
     
-    if MyRoot and TargetRoot then
+    -- User requested to stick to UpperTorso
+    local TargetPart = TargetChar:FindFirstChild("UpperTorso") or TargetChar:FindFirstChild("Torso") or TargetChar:FindFirstChild("HumanoidRootPart")
+    
+    if MyRoot and TargetPart then
         -- If arresting, stick to target and update position continuously
         if State.Mode == "arresting" then
             pcall(function()
-                sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetRoot)
+                sethiddenproperty(MyRoot, "PhysicsRepRootPart", TargetPart)
             end)
             
-            local ArrestCFrame = GetArrestPosition(TargetRoot)
+            local ArrestCFrame = GetArrestPosition(TargetPart)
             api:set_desync_cframe(ArrestCFrame)
         else
             -- Unglue when not arresting
