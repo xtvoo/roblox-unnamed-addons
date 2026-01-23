@@ -59,6 +59,15 @@ Settings:AddSlider("ArrestOffsetY", {
     Compact = true
 })
 
+Settings:AddSlider("ArrestDelay", {
+    Text = "Arrest Delay",
+    Default = 0.5,
+    Min = 0,
+    Max = 2,
+    Rounding = 1,
+    Tooltip = "Wait time after knock before arresting"
+})
+
 Settings:AddSlider("ArrestOffsetZ", {
     Text = "Arrest Offset Z",
     Default = 0,
@@ -111,13 +120,14 @@ local function UpdateMenuVisibility()
     if Options.ArrestMode then Options.ArrestMode.Visible = enabled end
     if Options.TargetType then Options.TargetType.Visible = enabled end
     if Options.MinWanted then Options.MinWanted.Visible = enabled end
-    if Options.TargetList then Options.TargetList.Visible = enabled end
+    if PlayerDropdown then PlayerDropdown.Visible = enabled end
     if Options.PlayerSearchInput then Options.PlayerSearchInput.Visible = enabled end
     
     -- Settings Group
     if Options.ArrestOffsetX then Options.ArrestOffsetX.Visible = enabled end
     if Options.ArrestOffsetY then Options.ArrestOffsetY.Visible = enabled end
     if Options.ArrestOffsetZ then Options.ArrestOffsetZ.Visible = enabled end
+    if Options.ArrestDelay then Options.ArrestDelay.Visible = enabled end
     if Toggles.AutoEquipCuffs then Toggles.AutoEquipCuffs.Visible = enabled end
     if Toggles.NotifyArrest then Toggles.NotifyArrest.Visible = enabled end
     if Toggles.DebugMode then Toggles.DebugMode.Visible = enabled end
@@ -397,6 +407,11 @@ local function GetArrestPosition(targetRoot)
 end
 
 local function PerformArrest()
+    -- Throttle attempts
+    local currentTime = tick()
+    if currentTime - State.LastArrestTime < 0.5 then return false end
+    State.LastArrestTime = currentTime
+
     -- Simple: Just equip cuffs and activate
     -- Positioning is handled by the physics loop
     
@@ -554,21 +569,28 @@ api:add_connection(RunService.Heartbeat:Connect(function()
             return
         end
         
-        if isKnocked and not State.IsArresting then
-            -- Target is knocked - arrest them immediately!
-            State.Mode = "arresting"
-            State.IsArresting = true
-            
-            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
+        if isKnocked then
+            -- Target is knocked - arrest them!
+            if not State.IsArresting then
+                State.Mode = "arresting"
+                State.IsArresting = true
+                State.KnockedTime = tick()
+                
+                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                    api:notify("🚔 Arresting " .. Target.Name .. " (" .. GetWantedLevel(Target) .. " wanted)", 2)
+                end
+                
+                -- Disable ragebot and clear target
+                UpdateTargetUI("nil")
+                SetRagebot(false)
             end
             
-            -- Disable ragebot and clear target
-            UpdateTargetUI("nil")
-            SetRagebot(false)
+            -- Wait delay before arresting
+            local delay = Options.ArrestDelay and Options.ArrestDelay.Value or 0.5
+            if tick() - State.KnockedTime >= delay then
+                PerformArrest()
+            end
             
-            -- Perform arrest (physics loop handles positioning)
-            PerformArrest()
         elseif not isKnocked then
             -- Kill target first - set as ragebot target
             if State.Mode ~= "killing_for_arrest" then
@@ -585,19 +607,26 @@ api:add_connection(RunService.Heartbeat:Connect(function()
         -- TODO: Integrate with bag system for full bag+knock+arrest combo
         local isKnocked = IsKnocked(Target)
         
-        if isKnocked and not State.IsArresting then
-            State.Mode = "arresting"
-            State.IsArresting = true
-            
-            if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
-                api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
+        if isKnocked then
+            if not State.IsArresting then
+                State.Mode = "arresting"
+                State.IsArresting = true
+                State.KnockedTime = tick()
+                
+                if Toggles.NotifyArrest and Toggles.NotifyArrest.Value then
+                    api:notify("🚔 Arresting (Bag Mode) " .. Target.Name, 2)
+                end
+                
+                UpdateTargetUI("nil")
+                SetRagebot(false)
             end
             
-            UpdateTargetUI("nil")
-            api:set_ragebot(false)
-            
-            -- Perform arrest (physics loop handles positioning)
-            PerformArrest()
+            -- Wait delay before arresting
+            local delay = Options.ArrestDelay and Options.ArrestDelay.Value or 0.5
+            if tick() - State.KnockedTime >= delay then
+                PerformArrest()
+            end
+
         else
             -- Use ragebot to knock them - set as target
             State.Mode = "knocking_for_arrest"
