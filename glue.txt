@@ -62,6 +62,19 @@ Main_Tab:AddToggle("only_when_target", {
     Tooltip = "Only glue when you have a target"
 })
 
+Main_Tab:AddToggle("always_face_target", {
+    Text = "Always Face Target",
+    Default = false,
+    Tooltip = "Rotate your character to face the target"
+})
+
+Main_Tab:AddDropdown("face_mode", {
+    Text = "Face Mode",
+    Default = 1,
+    Values = {"Face Target", "Behind Target", "Side View Left", "Side View Right"},
+    Tooltip = "Direction to face relative to target"
+})
+
 Main_Tab:AddButton({
     Text = "Manual Unglue",
     Func = function()
@@ -95,7 +108,7 @@ Position_Tab:AddSlider("glue_offset_y", {
     Text = "Y Offset",
     Default = 5,
     Min = -30,
-    Max = 300000000000000,
+    Max = 300,
     Rounding = 1,
     Compact = true,
     Callback = function(value)
@@ -289,8 +302,39 @@ local function EnableGlue(target)
             sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", TargetPart)
         end)
         
-        -- Set desync position with custom angle
+        -- Calculate base desync CFrame
         local desyncCFrame = CFrame.new(TargetPart.Position + GlueOffset) * GlueAngle
+        
+        -- Apply "Always Face Target" rotation if enabled
+        if Toggles['always_face_target'] and Toggles['always_face_target'].Value then
+            local myRoot = LocalPlayer.Character.HumanoidRootPart
+            local myPos = myRoot.Position
+            local targetPos = TargetPart.Position
+            local faceMode = Options['face_mode'].Value
+            
+            local lookDirection
+            if faceMode == "Face Target" then
+                -- Look directly at target
+                lookDirection = (targetPos - myPos).Unit
+            elseif faceMode == "Behind Target" then
+                -- Look in same direction as target (behind them)
+                lookDirection = TargetPart.CFrame.LookVector
+            elseif faceMode == "Side View Left" then
+                -- Look from left side
+                lookDirection = TargetPart.CFrame.RightVector
+            elseif faceMode == "Side View Right" then
+                -- Look from right side
+                lookDirection = -TargetPart.CFrame.RightVector
+            end
+            
+            -- Create rotation CFrame to face the direction
+            if lookDirection then
+                local facingCFrame = CFrame.lookAt(desyncCFrame.Position, desyncCFrame.Position + lookDirection)
+                -- Preserve the pitch/roll from GlueAngle but apply new facing direction
+                desyncCFrame = facingCFrame * CFrame.Angles(GlueAngle:ToEulerAnglesYXZ())
+            end
+        end
+        
         api:set_desync_cframe(desyncCFrame)
         return true
     end
@@ -352,7 +396,7 @@ end))
 
 -- Unload handler
 api:on_event("unload", function()
-    DisableGue()
+    DisableGlue()
     api:notify("Sticky glue unloaded", 2)
 end)
 
