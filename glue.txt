@@ -75,6 +75,14 @@ Main_Tab:AddDropdown("face_mode", {
     Tooltip = "Direction to face relative to target"
 })
 
+Main_Tab:AddDivider()
+
+Main_Tab:AddToggle("auto_glue_flame", {
+    Text = "Auto Glue to Flame Users",
+    Default = false,
+    Tooltip = "Automatically glue to silent aim target if they have flamethrower equipped"
+})
+
 Main_Tab:AddButton({
     Text = "Manual Unglue",
     Func = function()
@@ -288,6 +296,18 @@ Rotation_Tab:AddButton({
     end
 })
 
+-- Function to check if player has flamethrower equipped
+local function HasFlameEquipped(player)
+    if not player or not player.Character then return false end
+    
+    local tool = player.Character:FindFirstChildOfClass("Tool")
+    if not tool then return false end
+    
+    -- Check for flamethrower patterns
+    local flameName = tool.Name:lower()
+    return flameName:find("flame") or flameName:find("flamethrower")
+end
+
 -- Function to enable glue
 local function EnableGlue(target)
     if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then
@@ -364,6 +384,17 @@ Handler:AddConnection("Sticky Glue Update", RunService.Heartbeat:Connect(functio
     -- Get target based on selected type
     local targetType = Options['glue_target_type'].Value:lower()
     local Target = api:get_target(targetType)
+    
+    -- Auto-glue to flame users if enabled
+    if Toggles['auto_glue_flame'] and Toggles['auto_glue_flame'].Value then
+        local silentTarget = api:get_target("silent")
+        if silentTarget and HasFlameEquipped(silentTarget) then
+            Target = silentTarget
+            if CurrentTarget ~= silentTarget and Toggles['show_notifications'].Value then
+                api:notify("🔥 Auto-gluing to flame user: " .. silentTarget.Name, 2)
+            end
+        end
+    end
     
     -- Check if we should only glue when target exists
     if Toggles['only_when_target'].Value and not Target then
