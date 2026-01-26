@@ -128,6 +128,7 @@ local function UpdateMenuVisibility()
     if Options.ArrestOffsetY then Options.ArrestOffsetY.Visible = enabled end
     if Options.ArrestOffsetZ then Options.ArrestOffsetZ.Visible = enabled end
     if Options.ArrestDelay then Options.ArrestDelay.Visible = enabled end
+    if Options.IgnoreTime then Options.IgnoreTime.Visible = enabled end
     if Toggles.AutoEquipCuffs then Toggles.AutoEquipCuffs.Visible = enabled end
     if Toggles.NotifyArrest then Toggles.NotifyArrest.Visible = enabled end
     if Toggles.DebugMode then Toggles.DebugMode.Visible = enabled end
@@ -143,17 +144,28 @@ local State = {
     LastArrestTime = 0,
     Mode = "idle",
     ArrestAttempts = 0,
+    KnockedTime = 0,
+    RecentlyArrested = {}, -- [UserId] = tick()
+    LastRageEnabled = nil,
+    LastRageTarget = nil,
     
     -- Performance throttling
     LastPoliceCheck = 0,
     LastWantedCheck = 0,
     CachedIsPolice = false,
-    CachedWantedLevel = 0,
-    
-    -- State caching to prevent spam
-    LastRageTarget = nil,
-    LastRageEnabled = nil
+    CachedWantedLevel = 0
 }
+
+-- Add Ignore Duration Slider
+Settings:AddSlider("IgnoreTime", {
+    Text = "Ignore Arrested Time",
+    Default = 60,
+    Min = 0,
+    Max = 300,
+    Rounding = 0,
+    Suffix = "s",
+    Tooltip = "How long to ignore a player after arresting them"
+})
 
 -- ========== PLAYER LIST MANAGEMENT ==========
 local function GetPlayerFormat(player)
@@ -366,6 +378,16 @@ end
 
 local function IsTargetValid(player)
     if not player or not player.Character then return false end
+    
+    -- Check if recently arrested
+    if State.RecentlyArrested and State.RecentlyArrested[player.UserId] then
+        local ignoreTime = Options.IgnoreTime and Options.IgnoreTime.Value or 60
+        if tick() - State.RecentlyArrested[player.UserId] < ignoreTime then
+            return false -- Ignore this player
+        else
+            State.RecentlyArrested[player.UserId] = nil -- Expired
+        end
+    end
     
     local statusCache = api:get_status_cache(player)
     if not statusCache then return false end
