@@ -1,0 +1,119 @@
+-- NaN Fling V3 (Complete Rewrite)
+
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local Tab = api:add_tab("NaN Fling V3")
+local Group = Tab:AddLeftGroupbox("Controls")
+
+local InputTarget = Group:AddInput("v3_target_name", { Text = "Target" })
+local Keybind = Group:AddKeyPicker("v3_target_key", { Default = "None", Mode = "Toggle", Text = "Fling Key" })
+
+local isFlinging = false
+local flingLoop = nil
+local target = nil
+
+-- The velocity used to fling the target (Server side only)
+local flingVelocity = Vector3.new(9e9, 9e9, 9e9)
+
+local function Stop()
+    if not isFlinging then return end
+    isFlinging = false
+    target = nil
+    
+    if flingLoop then
+        flingLoop:Disconnect()
+        flingLoop = nil
+    end
+    
+    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if hrp then
+        pcall(function()
+            sethiddenproperty(hrp, "PhysicsRepRootPart", nil)
+        end)
+    end
+    
+    api:notify("Stopped.", 2)
+end
+
+local function Start(tgt)
+    if isFlinging or not tgt or not tgt.Character then return end
+    
+    isFlinging = true
+    target = tgt
+    api:notify("Flinging " .. tgt.DisplayName, 3)
+
+    flingLoop = RunService.Heartbeat:Connect(function()
+        if not isFlinging or not LocalPlayer.Character or not target.Character then
+            Stop()
+            return
+        end
+
+        local c_hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        local c_hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local t_hrp = target.Character:FindFirstChild("HumanoidRootPart")
+        
+        if not c_hum or not c_hrp or not t_hrp then return end
+
+        -- 1. Client character must stand up
+        c_hum.PlatformStand = false
+
+        -- 2. Stick our physical representation to the target
+        pcall(function()
+            sethiddenproperty(c_hrp, "PhysicsRepRootPart", t_hrp)
+        end)
+
+        -- 3. Teleport our Ghost/Server hitbox inside them, facing exactly where they face
+        if api.set_desync_cframe then
+             api:set_desync_cframe(t_hrp.CFrame) 
+        end
+
+        -- 4. MAX OUT the velocity of the TARGET's RootPart directly 
+        -- (Since PhysicsRepRootPart makes us control it)
+        -- We DO NOT apply this to c_hrp, because that voids the local player!
+        t_hrp.AssemblyLinearVelocity = flingVelocity
+        t_hrp.AssemblyAngularVelocity = flingVelocity
+    end)
+end
+
+Group:AddButton("Fling", function()
+    local name = InputTarget.Value
+    if not name or name == "" then
+        pcall(function()
+            local cache = api:get_target_cache("silent")
+            if cache and cache.player then Start(cache.player) end
+        end)
+    else
+        local found = Players:FindFirstChild(name)
+        if not found then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.Name:lower():sub(1, #name) == name:lower() or p.DisplayName:lower():sub(1, #name) == name:lower() then
+                    found = p
+                    break
+                end
+            end
+        end
+        if found then Start(found) else api:notify("Not found!", 2) end
+    end
+end)
+
+Group:AddButton("Stop", function() Stop() end)
+
+local lastKey = false
+RunService.Heartbeat:Connect(function()
+    local currentKey = Options.v3_target_key:GetState()
+    if currentKey and not lastKey then
+        if not isFlinging then
+            pcall(function()
+                local cache = api:get_target_cache("silent")
+                if cache and cache.player then Start(cache.player) end
+            end)
+        end
+    elseif not currentKey and lastKey then
+        if isFlinging then Stop() end
+    end
+    lastKey = currentKey
+end)
+
+api:notify("V3 Loaded", 3)

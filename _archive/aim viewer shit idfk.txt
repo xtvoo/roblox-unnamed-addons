@@ -1,0 +1,170 @@
+local Config = {
+    WebhookURL = "https://discord.com/api/webhooks/1464331337098985610/ApzCtZVaLr53oIm6lZi9FUsBvsDyQG3m3XIpJOZDB6Sdznqjdi4vOzMFZsoDAxU6vqsP",
+    AimViewerColor = Color3.new(1, 0, 0),
+    AimViewerThickness = 1.5,
+    AimViewerTransparency = 1,
+    DotColor = Color3.new(1, 1, 1),
+    DotSize = 5,
+    DotTransparency = 1,
+    UseFilledDot = true
+}
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+local Drawings = {}
+local LastShooter = {}
+
+local function SafeCheck(player)
+    return player and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0
+end
+
+local function GetMousePos(player)
+    if SafeCheck(player) then
+        local bodyEffects = player.Character:FindFirstChild("BodyEffects")
+        if bodyEffects and bodyEffects:FindFirstChild("MousePos") then
+            return bodyEffects.MousePos.Value
+        end
+        local head = player.Character:FindFirstChild("Head")
+        if head then
+            return head.Position + (head.CFrame.LookVector * 100)
+        end
+    end
+    return nil
+end
+
+local function LogWebhook(killerName, victimName)
+    if Config.WebhookURL == "" or Config.WebhookURL == "YOUR_WEBHOOK_URL_HERE" then return end
+    
+    local payload = {
+        username = "Da Hood Kill Feed",
+        embeds = {{
+            title = "Global Kill Log",
+            description = killerName .. " killed " .. victimName,
+            color = 16711680,
+            footer = { text = "Antigravity Script" },
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }}
+    }
+    
+    local headers = { ["Content-Type"] = "application/json" }
+    local requestFunc = (syn and syn.request) or (http and http.request) or http_request or request
+    if requestFunc then
+        requestFunc({
+            Url = Config.WebhookURL,
+            Method = "POST",
+            Headers = headers,
+            Body = HttpService:JSONEncode(payload)
+        })
+    end
+end
+
+local function GetGunPosition(tool)
+    if tool:FindFirstChild("Muzzle") then
+        return tool.Muzzle.Position
+    elseif tool:FindFirstChild("Barrel") then
+        return tool.Barrel.Position
+    elseif tool:FindFirstChild("Handle") then
+        return tool.Handle.Position
+    end
+    return nil
+end
+
+local function UpdateDrawings()
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and SafeCheck(player) then
+            if not Drawings[player.Name] then
+                Drawings[player.Name] = {
+                    Line = Drawing.new("Line"),
+                    Circle = Drawing.new("Circle")
+                }
+                
+                local line = Drawings[player.Name].Line
+                line.Visible = false
+                line.Color = Config.AimViewerColor
+                line.Thickness = Config.AimViewerThickness
+                line.Transparency = Config.AimViewerTransparency
+                
+                local circle = Drawings[player.Name].Circle
+                circle.Visible = false
+                circle.Color = Config.DotColor
+                circle.Radius = Config.DotSize
+                circle.Transparency = Config.DotTransparency
+                circle.Filled = Config.UseFilledDot
+            end
+            
+            local line = Drawings[player.Name].Line
+            local circle = Drawings[player.Name].Circle
+            local character = player.Character
+            local tool = character:FindFirstChildOfClass("Tool")
+            
+            if tool then
+                local startPos = GetGunPosition(tool)
+                local endPos = GetMousePos(player)
+                
+                if startPos and endPos then
+                    local camera = workspace.CurrentCamera
+                    local startScreen, startVis = camera:WorldToViewportPoint(startPos)
+                    local endScreen, endVis = camera:WorldToViewportPoint(endPos)
+                    
+                    if startVis and endVis then
+                        line.From = Vector2.new(startScreen.X, startScreen.Y)
+                        line.To = Vector2.new(endScreen.X, endScreen.Y)
+                        line.Visible = true
+                        
+                        circle.Position = Vector2.new(endScreen.X, endScreen.Y)
+                        circle.Visible = true
+                    else
+                        line.Visible = false
+                        circle.Visible = false
+                    end
+                else
+                    line.Visible = false
+                    circle.Visible = false
+                end
+            else
+                line.Visible = false
+                circle.Visible = false
+            end
+        else
+            if Drawings[player.Name] then
+                Drawings[player.Name].Line.Visible = false
+                Drawings[player.Name].Circle.Visible = false
+            end
+        end
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    if Drawings[player.Name] then
+        Drawings[player.Name].Line:Remove()
+        Drawings[player.Name].Circle:Remove()
+        Drawings[player.Name] = nil
+    end
+    LastShooter[player.Name] = nil
+end)
+
+api:on_event("player_got_shot", function(victim, shooter)
+    LastShooter[victim] = shooter
+end)
+
+task.spawn(function()
+    while true do
+        for _, player in pairs(Players:GetPlayers()) do
+            local status = api:get_status_cache(player)
+            if status then
+                local isDead = status.Dead or status["K.O"] or status["SDeath"] or status["SDead"]
+                if isDead and LastShooter[player.Name] then
+                    LogWebhook(LastShooter[player.Name], player.Name)
+                    LastShooter[player.Name] = nil
+                end
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    UpdateDrawings()
+end)

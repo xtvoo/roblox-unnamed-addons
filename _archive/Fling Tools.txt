@@ -1,0 +1,393 @@
+
+local runservice = game:GetService("RunService");
+local players = game:GetService("Players");
+local replicatedStorage = game:GetService("ReplicatedStorage");
+local localPlayer = players.LocalPlayer;
+
+local FlingToolsAddon = {
+    connections = {},
+    tools = {},
+    animations = {},
+    animationTracks = {},
+    soundEffect = nil,
+    isFlinging = false,
+    currentTool = nil,
+    
+    config = {
+        ["Kick"] = {
+            soundId = "0",
+            animationId = "2788306916",
+            animationSpeed = 3.4,
+            textureId = "483225199",
+            velocityMultiplier = 1.0
+        },
+        ["Smash"] = {
+            soundId = "0",
+            animationId = "3354696735",
+            animationSpeed = 1.3,
+            textureId = "483225199",
+            velocityMultiplier = 1.2
+        },
+        ["Push"] = {
+            soundId = "0",
+            animationId = "3355740058",
+            animationSpeed = 1.0,
+            textureId = "483225199",
+            velocityMultiplier = 0.8
+        },
+        ["Uppercut"] = {
+            soundId = "0",
+            animationId = "3355740058",
+            animationSpeed = 1.5,
+            textureId = "483225199",
+            velocityMultiplier = 1.5
+        }
+    }
+};
+
+-- Create UI elements
+do
+    local tab = api:add_tab("Fling Tools");
+    local mainGroup = tab:AddLeftGroupbox("Main Settings");
+    local toolGroup = tab:AddRightGroupbox("Tool Settings");
+    local soundGroup = tab:AddRightGroupbox("Sound Settings");
+    
+    -- Main toggle
+    mainGroup:AddToggle("enable_tools", {
+        Text = "Enable Fling Tools",
+        Default = false,
+        Tooltip = "Adds fling tools to your backpack",
+        Callback = function(value)
+            if value then
+                FlingToolsAddon:EnableTools();
+            else
+                FlingToolsAddon:DisableTools();
+            end
+        end
+    });
+
+
+    
+    -- Auto Fling
+    mainGroup:AddToggle("auto_fling", {
+        Text = "Auto Fling",
+        Default = false,
+        Tooltip = "Automatically runs at nearby players",
+        Callback = function(value)
+             FlingToolsAddon:ToggleAutoFling(value);
+        end
+    });
+    
+    -- Tool selector dropdown
+    toolGroup:AddDropdown("tool_selection", {
+        Values = {"Kick", "Smash", "Push", "Uppercut"},
+        Default = 1,
+        Multi = false,
+        Text = "Select Tool",
+        Tooltip = "Choose which tool to add to your backpack",
+        Callback = function(value)
+            if Toggles.enable_tools.Value then
+                FlingToolsAddon:UpdateTool(value);
+            end
+        end
+    });
+    
+    -- Fling power slider
+    toolGroup:AddSlider("fling_power", {
+        Text = "Fling Power",
+        Default = 800,
+        Min = 100,
+        Max = 300000000000000000, -- 300k as recommended
+        Rounding = 0,
+        Suffix = " power",
+        Tooltip = "Higher values = stronger fling (300k recommended)"
+    });
+    
+    -- Add all tools button
+    toolGroup:AddButton("Add All Tools", function()
+        if not Toggles.enable_tools.Value then
+            api:notify("Enable Fling Tools first!", 3);
+            return;
+        end
+        FlingToolsAddon:AddAllTools();
+    end);
+    
+    -- Sound ID input
+    soundGroup:AddInput("sound_id", {
+        Text = "Sound ID",
+        Default = FlingToolsAddon.config["Kick"].soundId,
+        Tooltip = "Sound to play when using tools",
+        Callback = function(value)
+            -- Update all tool sound IDs
+            for _, toolConfig in pairs(FlingToolsAddon.config) do
+                toolConfig.soundId = value;
+            end
+        end
+    });
+    
+    -- Sound test button
+    soundGroup:AddButton("Test Sound", function()
+        local sound = Instance.new("Sound", workspace);
+        sound.SoundId = "rbxassetid://"..Options.sound_id.Value;
+        sound:Play();
+        task.delay(1, function()
+            sound:Stop();
+            sound:Destroy();
+        end);
+    end);
+end
+
+-- Tool functions
+function FlingToolsAddon:CreateTool(toolName)
+    local config = self.config[toolName];
+    if not config then return end
+    
+    -- Remove existing tool if any
+    if self.tools[toolName] then
+        self.tools[toolName]:Destroy();
+    end
+    
+    -- Create new tool
+    local tool = Instance.new("Tool");
+    tool.RequiresHandle = false;
+    tool.Name = "["..toolName.."]";
+    tool.TextureId = "rbxassetid://"..config.textureId;
+    
+    -- Create animation if not exists
+    if not self.animations[toolName] then
+        self.animations[toolName] = Instance.new("Animation");
+        self.animations[toolName].AnimationId = "rbxassetid://"..config.animationId;
+    end
+    
+    -- Tool activation
+    tool.Activated:Connect(function()
+        if self.isFlinging then return end
+        self.isFlinging = true;
+        self.currentTool = toolName;
+        
+        local character = localPlayer.Character;
+        if not character then return end
+        
+        local humanoid = character:FindFirstChild("Humanoid");
+        local animator = humanoid and humanoid:FindFirstChild("Animator");
+        
+        -- Play animation
+        if humanoid and animator then
+            self.animationTracks[toolName] = animator:LoadAnimation(self.animations[toolName]);
+            self.animationTracks[toolName]:AdjustSpeed(config.animationSpeed);
+            self.animationTracks[toolName]:Play();
+        end
+        
+        task.wait(0.6);
+        
+        -- Play sound effect
+        local soundId = Options.sound_id.Value or config.soundId;
+        local boombox = localPlayer.Backpack:FindFirstChild("[Boombox]") or 
+                       localPlayer.Character:FindFirstChild("[Boombox]");
+        
+        if boombox then
+            boombox.Parent = localPlayer.Character;
+            replicatedStorage.MainEvent:FireServer("Boombox", tonumber(soundId));
+            boombox.Parent = localPlayer.Backpack;
+            task.wait(1);
+            replicatedStorage.MainEvent:FireServer("BoomboxStop");
+        else
+            if self.soundEffect then self.soundEffect:Destroy() end
+            self.soundEffect = Instance.new("Sound", workspace);
+            self.soundEffect.SoundId = "rbxassetid://"..soundId;
+            self.soundEffect:Play();
+            task.delay(1, function()
+                self.soundEffect:Stop();
+                self.soundEffect:Destroy();
+                self.soundEffect = nil;
+            end);
+        end
+        
+        task.wait(1.4);
+        self.isFlinging = false;
+        self.currentTool = nil;
+    end);
+    
+    self.tools[toolName] = tool;
+    return tool;
+end
+
+function FlingToolsAddon:AddToolToBackpack(toolName)
+    local tool = self:CreateTool(toolName);
+    local backpack = localPlayer:FindFirstChild("Backpack");
+    if backpack and tool then
+        tool.Parent = backpack;
+        api:notify(toolName.." tool added!", 2);
+    end
+end
+
+function FlingToolsAddon:RemoveTool(toolName)
+    if self.tools[toolName] then
+        self.tools[toolName]:Destroy();
+        self.tools[toolName] = nil;
+    end
+end
+
+function FlingToolsAddon:RemoveAllTools()
+    for toolName, _ in pairs(self.config) do
+        self:RemoveTool(toolName);
+    end
+    if self.soundEffect then
+        self.soundEffect:Stop();
+        self.soundEffect:Destroy();
+        self.soundEffect = nil;
+    end
+end
+
+function FlingToolsAddon:AddAllTools()
+    for toolName, _ in pairs(self.config) do
+        self:AddToolToBackpack(toolName);
+    end
+    api:notify("All tools added to backpack!", 2);
+end
+
+function FlingToolsAddon:UpdateTool(toolName)
+    self:RemoveAllTools();
+    self:AddToolToBackpack(toolName);
+end
+
+function FlingToolsAddon:EnableTools()
+    local selectedTool = Options.tool_selection.Value;
+    self:AddToolToBackpack(selectedTool);
+    
+    -- Start physics loop if not already running
+    if not self.connections.physicsLoop then
+        self.connections.physicsLoop = runservice.Heartbeat:Connect(function()
+            self:ApplyFlingPhysics();
+        end);
+    end
+    
+    -- Set up character added event
+    if not self.connections.characterAdded then
+        self.connections.characterAdded = localPlayer.CharacterAdded:Connect(function()
+            task.wait(1); -- Wait for backpack to exist
+            if Toggles.enable_tools.Value then
+                self:AddToolToBackpack(Options.tool_selection.Value);
+            end
+            if Toggles.auto_fling.Value then
+                 self:ToggleAutoFling(true);
+            end
+        end);
+    end
+end
+
+function FlingToolsAddon:DisableTools()
+    self:RemoveAllTools();
+    
+    -- Disconnect physics loop
+    if self.connections.physicsLoop then
+        self.connections.physicsLoop:Disconnect();
+        self.connections.physicsLoop = nil;
+    end
+    
+    -- Disconnect auto fling loop
+    if self.connections.autoFling then
+        self.connections.autoFling:Disconnect();
+        self.connections.autoFling = nil;
+    end
+    
+
+    
+    -- Disconnect character added event
+    if self.connections.characterAdded then
+        self.connections.characterAdded:Disconnect();
+        self.connections.characterAdded = nil;
+    end
+end
+
+function FlingToolsAddon:ApplyFlingPhysics()
+    if not self.isFlinging or not self.currentTool then return end
+    
+    local character = localPlayer.Character;
+    if not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart");
+    if not humanoidRootPart then return end
+    
+    local config = self.config[self.currentTool];
+    if not config then return end
+    
+    local originalVelocity = humanoidRootPart.Velocity;
+    local flingPower = Options.fling_power.Value * config.velocityMultiplier;
+    
+
+
+    -- Uppercut Logic (Vertical Bias)
+    local verticalBias = 0;
+    if self.currentTool == "Uppercut" then
+        verticalBias = flingPower * 0.5;
+    end
+
+    humanoidRootPart.Velocity = Vector3.new(
+        humanoidRootPart.CFrame.LookVector.X * flingPower,
+        flingPower + verticalBias,
+        humanoidRootPart.CFrame.LookVector.Z * flingPower
+    );
+    
+    runservice.RenderStepped:Wait();
+    humanoidRootPart.Velocity = originalVelocity;
+    
+
+end
+
+function FlingToolsAddon:ToggleAutoFling(state)
+    if self.connections.autoFling then
+        self.connections.autoFling:Disconnect();
+        self.connections.autoFling = nil;
+    end
+
+    if state then
+        self.connections.autoFling = runservice.Heartbeat:Connect(function()
+            local myRoot = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart");
+            if not myRoot then return end
+
+            local closest = nil;
+            local minDist = 50; -- Range
+
+            for _, plr in pairs(players:GetPlayers()) do
+                if plr ~= localPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                    local dist = (plr.Character.HumanoidRootPart.Position - myRoot.Position).Magnitude;
+                    if dist < minDist then
+                        minDist = dist;
+                        closest = plr.Character.HumanoidRootPart;
+                    end
+                end
+            end
+
+            if closest then
+                -- Move towards target
+                local humanoid = localPlayer.Character:FindFirstChild("Humanoid");
+                if humanoid then
+                    humanoid:MoveTo(closest.Position);
+                    
+                    -- Activate tool if close enough
+                     if minDist < 5 and not self.isFlinging then
+                        local tool = localPlayer.Character:FindFirstChildOfClass("Tool");
+                        if tool then tool:Activate() end
+                     end
+                end
+            end
+        end);
+    end
+end
+
+-- Cleanup function
+api:on_event("unload", function()
+    FlingToolsAddon:DisableTools();
+    
+    for _, connection in pairs(FlingToolsAddon.connections) do
+        if type(connection) == "userdata" then -- Check if it's a connection
+            connection:Disconnect();
+        end
+    end
+    
+    table.clear(FlingToolsAddon);
+    api:notify("Fling Tools Addon unloaded", 2);
+end);
+
+api:notify("Ultimate Fling Tools addon loaded!", 3);

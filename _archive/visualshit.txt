@@ -1,0 +1,199 @@
+print("DEBUG: Script Loaded - Line 1")
+-- Refactored Visual Effects Script (No Locals)
+
+if not api then 
+    warn("VisualShit: API not found!")
+    return 
+end
+
+-- // Configuration
+local Config = {
+    Beam = {
+        Enabled = true,
+        StartColor = Color3.fromRGB(255, 220, 100),
+        EndColor = Color3.fromRGB(255, 80, 80),
+        Width = 0.12,
+        Lifetime = 0.35,
+        Brightness = 2.2,
+        FadeLerp = 0.7,
+        PositionLerp = 0.0
+    },
+    Impact = {
+        Enabled = true,
+        Color = Color3.fromRGB(255, 60, 60),
+        Size = 3.6,
+        Shape = "Sphere", 
+        Lifetime = 0.65,
+        FadeLerp = 0.55
+    }
+}
+
+-- // Utilities
+local function sanitizeColor(c)
+    if c.R > 1 or c.G > 1 or c.B > 1 then
+        return Color3.new(c.R/255, c.G/255, c.B/255)
+    end
+    return c
+end
+
+-- // Effect Logic
+local Effects = {}
+
+function Effects.SpawnBeam(from, to)
+    if not Config.Beam.Enabled then return end
+    
+    local dist = (to - from).Magnitude
+    if dist < 0.1 then return end
+
+    local beamPart = Instance.new("Part")
+    beamPart.Name = "FX_Beam"
+    beamPart.Anchored = true
+    beamPart.CanCollide = false
+    beamPart.Transparency = 1
+    beamPart.Size = Vector3.new(0.05, 0.05, 0.05)
+    beamPart.Position = from
+    beamPart.Parent = workspace
+
+    local att0 = Instance.new("Attachment", beamPart)
+    local att1 = Instance.new("Attachment", beamPart)
+    
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = att0
+    beam.Attachment1 = att1
+    beam.Width0 = Config.Beam.Width
+    beam.Width1 = Config.Beam.Width
+    beam.FaceCamera = true
+    beam.LightEmission = Config.Beam.Brightness
+    
+    local sColor = sanitizeColor(Config.Beam.StartColor)
+    local eColor = sanitizeColor(Config.Beam.EndColor)
+    beam.Color = ColorSequence.new(sColor, eColor)
+    
+    beam.Transparency = NumberSequence.new(0)
+    beam.Parent = beamPart
+
+    local lifetime = Config.Beam.Lifetime
+    local travelLerp = math.clamp(Config.Beam.PositionLerp, 0, 1)
+    
+    local travelTime = 0
+    if travelLerp > 0 then
+        att1.Position = Vector3.new(0,0,0)
+        travelTime = lifetime * 0.85 * travelLerp
+        
+        local tweenMoves = game:GetService("TweenService"):Create(att1, TweenInfo.new(travelTime, Enum.EasingStyle.Linear), {
+            Position = beamPart.CFrame:PointToObjectSpace(to)
+        })
+        tweenMoves:Play()
+    else
+        att1.WorldPosition = to
+    end
+
+    local fadeTime = lifetime * math.clamp(Config.Beam.FadeLerp, 0, 1)
+    local delayTime = lifetime - fadeTime
+    
+    -- Cleanup Sequence
+    task.delay(delayTime, function()
+        if not beam or not beam.Parent then return end
+        local tweenFade = game:GetService("TweenService"):Create(beam, TweenInfo.new(fadeTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Transparency = NumberSequence.new(1)
+        })
+        tweenFade:Play()
+    end)
+    
+    task.delay(lifetime + 0.1, function()
+        if beamPart and beamPart.Parent then beamPart:Destroy() end
+    end)
+end
+
+function Effects.SpawnImpact(pos)
+    if not Config.Impact.Enabled then return end
+
+    local p = Instance.new("Part")
+    p.Name = "FX_Impact"
+    p.Anchored = true
+    p.CanCollide = false
+    p.Material = Enum.Material.Neon
+    p.Color = sanitizeColor(Config.Impact.Color)
+    p.CFrame = CFrame.new(pos)
+    p.Transparency = 0
+    p.Parent = workspace
+
+    local rawSize = Config.Impact.Size / 10
+    if Config.Impact.Shape == "Sphere" then
+        p.Shape = Enum.PartType.Ball
+        p.Size = Vector3.new(rawSize, rawSize, rawSize)
+    else
+        p.Shape = Enum.PartType.Block
+        p.Size = Vector3.new(rawSize * 2, rawSize, rawSize * 3)
+    end
+
+    local lifetime = Config.Impact.Lifetime
+    local fadeTime = lifetime * math.clamp(Config.Impact.FadeLerp, 0, 1)
+    local delayTime = lifetime - fadeTime
+
+    task.delay(delayTime, function()
+        if not p or not p.Parent then return end
+        local tween = game:GetService("TweenService"):Create(p, TweenInfo.new(fadeTime, Enum.EasingStyle.Linear), {
+            Transparency = 1
+        })
+        tween:Play()
+    end)
+    
+    task.delay(lifetime + 0.1, function()
+        if p and p.Parent then p:Destroy() end
+    end)
+end
+
+-- // UI Integration
+local tab = api:GetTab("visuals")
+local box = tab:AddRightTabbox("Hit Effects Reforged")
+
+box:AddButton("Test Effect (Debug)", function() 
+    print("Test Button Pressed")
+    local root = game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if root then
+        local startPos = root.Position
+        local endPos = startPos + (root.CFrame.LookVector * 10) + Vector3.new(0, 2, 0)
+        Effects.SpawnBeam(startPos, endPos)
+        Effects.SpawnImpact(endPos)
+        print("Test Effect Spawned")
+    else
+        print("Character/Root not found for test")
+    end
+end)
+
+local beamTab = box:AddTab("Beam")
+local partTab = box:AddTab("Impact")
+
+-- Beam UI
+local beamToggle = beamTab:AddToggle("BeamEnabled", { Text = "Show Beam", Default = Config.Beam.Enabled, Callback = function(v) Config.Beam.Enabled = v end })
+beamToggle:AddColorPicker("BeamStart", { title = "Start Color", Default = Config.Beam.StartColor, Callback = function(c) Config.Beam.StartColor = c end })
+beamToggle:AddColorPicker("BeamEnd", { Text = "End Color", Default = Config.Beam.EndColor, Callback = function(c) Config.Beam.EndColor = c end })
+
+local beamDep = beamTab:AddDependencyBox()
+beamDep:AddSlider("BeamWidth", { Text = "Thickness", Default = Config.Beam.Width * 100, Min = 1, Max = 30, Suffix = "%", Compact = true, Rounding = 0, Callback = function(v) Config.Beam.Width = v/100 end })
+beamDep:AddSlider("BeamLife", { Text = "Lifetime", Default = Config.Beam.Lifetime, Min = 0.1, Max = 5, Suffix = "s", Compact = true, Rounding = 2, Callback = function(v) Config.Beam.Lifetime = v end })
+beamDep:AddSlider("BeamFade", { Text = "Fade Lerp", Default = Config.Beam.FadeLerp, Min = 0, Max = 1, Compact = true, Rounding = 2, Callback = function(v) Config.Beam.FadeLerp = v end })
+beamDep:AddSlider("BeamGlow", { Text = "Glow/Brightness", Default = Config.Beam.Brightness, Min = 0, Max = 10, Compact = true, Rounding = 1, Callback = function(v) Config.Beam.Brightness = v end })
+beamDep:SetupDependencies({ { Toggles.BeamEnabled, true } })
+
+-- Impact UI
+local impactToggle = partTab:AddToggle("ImpactEnabled", { Text = "Show Impact", Default = Config.Impact.Enabled, Callback = function(v) Config.Impact.Enabled = v end })
+impactToggle:AddColorPicker("ImpactColor", { Text = "Color", Default = Config.Impact.Color, Callback = function(c) Config.Impact.Color = c end })
+
+local partDep = partTab:AddDependencyBox()
+partDep:AddDropdown("ImpactShape", { Text = "Shape", Default = 1, Values = {"Sphere", "Block"}, Callback = function(v) Config.Impact.Shape = (v == 1 and "Sphere" or "Block") end })
+partDep:AddSlider("ImpactSize", { Text = "Size", Default = Config.Impact.Size, Min = 1, Max = 20, Suffix = "%", Compact = true, Rounding = 1, Callback = function(v) Config.Impact.Size = v end })
+partDep:AddSlider("ImpactLife", { Text = "Lifetime", Default = Config.Impact.Lifetime, Min = 0.1, Max = 5, Suffix = "s", Compact = true, Rounding = 2, Callback = function(v) Config.Impact.Lifetime = v end })
+partDep:AddSlider("ImpactFade", { Text = "Fade Lerp", Default = Config.Impact.FadeLerp, Min = 0, Max = 1, Compact = true, Rounding = 2, Callback = function(v) Config.Impact.FadeLerp = v end })
+partDep:SetupDependencies({ { Toggles.ImpactEnabled, true } })
+
+-- // Event Listeners
+api:on_event("localplayer_hit_player", function(_, _, _, _, origin, position)
+    if origin and position then
+        Effects.SpawnBeam(origin, position)
+        Effects.SpawnImpact(position)
+    end
+end)
+
+print("Visual Effects Reforged Loaded (Nuclear Option)")

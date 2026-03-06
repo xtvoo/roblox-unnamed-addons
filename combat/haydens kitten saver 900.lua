@@ -1,0 +1,902 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local function safe_call(func, name)
+    local success, err = pcall(func)
+    if not success then
+        print(string.format("[KITTEN SAVER ERROR] in %s: %s", name or "Unknown", tostring(err)))
+    end
+    return success, err
+end
+
+-- Declare SyncWhitelist at file scope so the loop can see it
+local SyncWhitelist = nil
+
+local MainEvent = ReplicatedStorage:FindFirstChild("MainEvent")
+if not MainEvent then print("[KITTEN SAVER ERROR] MainEvent not found in ReplicatedStorage!") end
+
+safe_call(function() api:set_lua_name("Hayden's Kitten Saver 900") end, "api:set_lua_name")
+
+-- Define SyncWhitelist implementation
+SyncWhitelist = function()
+    safe_call(function()
+        -- 1. Get Whitelist Dropdown Values (Formatted Names)
+        local raw_names_to_whitelist = {}
+        
+        local protector_wl = api:get_ui_object("protector_whitelist")
+        if protector_wl and protector_wl.Value then 
+            for formatted_name, enabled in pairs(protector_wl.Value) do 
+                if enabled then
+                    -- Extract Username from "Display (@Name)"
+                    local username = formatted_name:match("@([^%)]+)")
+                    if username then
+                        raw_names_to_whitelist[username] = true
+                    elseif not formatted_name:find("@") then
+                         -- Fallback if just raw name
+                         raw_names_to_whitelist[formatted_name] = true
+                    end
+                end
+            end
+        end
+        
+        -- 2. Get Current Owner Name (Always Raw Username)
+        local owner_input = api:get_ui_object("protector_owner_input")
+        if owner_input and owner_input.Value and owner_input.Value ~= "" then
+            raw_names_to_whitelist[owner_input.Value] = true 
+        end
+        
+            -- User suggested GetValue/SetOption
+            if GetValue and SetOption then
+                local current_wl = GetValue("ragebot_whitelist")
+                local r_vals = current_wl or {}
+                if type(r_vals) ~= "table" then r_vals = {} end
+                
+                local changed = false
+                for name, _ in pairs(raw_names_to_whitelist) do
+                    local found = false
+                    for _, v in pairs(r_vals) do
+                        if v == name then found = true break end
+                    end
+                    if not found then
+                        table.insert(r_vals, name)
+                        changed = true
+                        print("[KS DEBUG] Added " .. name .. " via SetOption")
+                    end
+                end
+                
+                if changed then
+                        SetOption("ragebot_whitelist", r_vals)
+                        print("[KS DEBUG] Updated ragebot_whitelist via SetOption")
+                end
+                -- Do NOT return here, fall through to UI object update for visual sync
+            end
+            
+            -- Fallback / Visual Sync (Update the UI object directly if found)
+             local ragebot_ui = api:get_ui_object("ragebot_whitelist") or api:get_ui_object("whitelist") or api:get_ui_object("Whitelist")
+             if ragebot_ui then
+                 -- Handle UI Object Sync (Array style)
+                 local r_selection = ragebot_ui.Value or {}
+                 if type(r_selection) ~= "table" then r_selection = {} end
+                 
+                 local r_options = ragebot_ui.Values or (ragebot_ui.options) or {}
+                 if type(r_options) ~= "table" then r_options = {} end
+
+                 local changed_sel, changed_opt = false, false
+                 
+                 for name, _ in pairs(raw_names_to_whitelist) do
+                     -- Ensure in Options
+                     local in_opt = false
+                     for _, v in pairs(r_options) do if v == name then in_opt = true break end end
+                     if not in_opt then table.insert(r_options, name) changed_opt = true end
+                     
+                     -- Ensure in Selection
+                     local in_sel = false
+                     for _, v in pairs(r_selection) do if v == name then in_sel = true break end end
+                     if not in_sel then table.insert(r_selection, name) changed_sel = true end
+                 end
+                 
+                 if changed_opt and ragebot_ui.SetValues then ragebot_ui:SetValues(r_options) end
+                 if changed_sel then ragebot_ui:SetValue(r_selection) print("[KS DEBUG] Updated Ragebot UI Object") end
+             end
+    end, "SyncWhitelist")
+end
+
+local ragebot_tab, protector_group, utility_group
+safe_call(function()
+    ragebot_tab = api:GetTab("ragebot") or api:AddTab("ragebot")
+    protector_group = ragebot_tab:AddLeftGroupbox("Kitten Saver Protector")
+    utility_group = ragebot_tab:AddRightGroupbox("Kitten Saver Utility")
+end, "UI Setup Tabs/Groups")
+
+safe_call(function()
+    protector_group:AddToggle("protector_active", { Text = "Enable Protector", Default = false })
+    
+    local function saveConfig(owner_name)
+        if hasattr and hasattr(writefile, "function") then return end 
+        if writefile then
+             pcall(function() writefile("kitten_saver_config.txt", owner_name or "") end)
+        end
+    end
+    
+    local function loadConfig()
+        if isfile and isfile("kitten_saver_config.txt") then
+            return readfile("kitten_saver_config.txt")
+        end
+        return nil
+    end
+
+    local saved_owner = loadConfig()
+    
+    protector_group:AddInput("protector_owner_input", {
+        Default = saved_owner or "",
+        Numeric = false,
+        Finished = true,
+        Text = "Owner Username (Auto-Saves)",
+        Tooltip = "Enter username to protect. Saves automatically.",
+        Callback = function(val)
+            saveConfig(val)
+            SyncWhitelist() -- Now this will work!
+            -- Auto-update target list if valid
+            if val and val ~= "" then
+                local targets_obj = api:get_ui_object("protector_targets")
+                if targets_obj then
+                    local p = Players:FindFirstChild(val)
+                    if p then
+                       -- Logic to select in dropdown if needed
+                    end
+                end
+            end
+        end
+    })
+
+    protector_group:AddToggle("protector_aim_check", { Text = "Kill on Aim (Pre-emptive)", Default = false })
+    protector_group:AddSlider("protector_aim_dist", { Text = "Aim Detect Dist", Default = 100, Min = 10, Max = 300, Rounding = 0, Compact = false })
+    protector_group:AddToggle("protector_reload_on_ko", { Text = "Force Reload on Knock", Default = false })
+    protector_group:AddToggle("protector_stomp", { Text = "Stomp Target (Doesnt Work w FP)", Default = false })
+    protector_group:AddSlider("protector_stomp_height", { Text = "Stomp Height", Default = 3, Min = -5, Max = 10, Rounding = 1, Compact = false })
+    protector_group:AddDropdown("protector_targets", { Text = "Select Players to Protect", Values = {}, Multi = true, Default = {} })
+
+    protector_group:AddDropdown("protector_whitelist", { 
+        Text = "Whitelist (Ignore)", 
+        Values = {}, 
+        Multi = true, 
+        Default = {},
+        Callback = function() SyncWhitelist() end
+    })
+    
+    protector_group:AddToggle("protector_follow_owner", { Text = "Follow Owner", Default = false })
+    protector_group:AddSlider("protector_follow_off_x", { Text = "Follow Offset X", Default = 0, Min = -50, Max = 50, Rounding = 1, Compact = false })
+    protector_group:AddSlider("protector_follow_off_y", { Text = "Follow Offset Y", Default = 0, Min = -50, Max = 50, Rounding = 1, Compact = false })
+    protector_group:AddSlider("protector_follow_off_z", { Text = "Follow Offset Z", Default = 5, Min = -50, Max = 50, Rounding = 1, Compact = false })
+    protector_group:AddToggle("protector_nan_idle", { Text = "Idle in NaN Void", Default = false })
+    protector_group:AddSlider("protector_threat_timeout", { 
+        Text = "Threat Timeout (sec)", 
+        Default = 30, 
+        Min = 10, 
+        Max = 120, 
+        Rounding = 0, 
+        Compact = false,
+        Tooltip = "How long before a threat is cleared if not killed"
+    })
+    protector_group:AddToggle("protector_use_flame", { Text = "Use Flame while Killing", Default = false })
+    protector_group:AddButton("Clear All Protected", function()
+        local targets_obj = api:get_ui_object("protector_targets")
+        if targets_obj then targets_obj:SetValue({}) end
+    end)
+    protector_group:AddButton("Force Stop Ragebot", function()
+        api:set_ragebot(false)
+        local rb_enabled = api:get_ui_object("ragebot_enabled")
+        if rb_enabled then 
+            rb_enabled:SetValue(false) 
+        end
+        local rb_targets = api:get_ui_object("ragebot_targets")
+        if rb_targets then
+            rb_targets:SetValue({})
+            rb_targets:SetValue("")
+        end
+        api:notify("[KITTEN SAVER] Ragebot Force Stopped", 4)
+    end)
+end, "UI Setup Objects")
+
+local function forceReload()
+    safe_call(function()
+        local char = LocalPlayer.Character
+        if char then
+            local tool = char:FindFirstChildWhichIsA("Tool")
+            if tool and MainEvent then
+                MainEvent:FireServer("Reload", tool)
+                -- Also try keypress as backup
+                if VirtualInputManager then
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+                    task.wait(0.05)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+                end
+            end
+        end
+    end, "forceReload")
+end
+
+local function getFormattedName(player)
+    return string.format("%s (@%s)", player.DisplayName, player.Name)
+end
+
+local function updatePlayerList()
+    safe_call(function()
+        local dropdown_items = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local formatted = getFormattedName(player)
+                table.insert(dropdown_items, formatted)
+            end
+        end
+        
+        local dropdown_p = api:get_ui_object("protector_targets")
+        local dropdown_w = api:get_ui_object("protector_whitelist")
+        
+        if dropdown_w then dropdown_w:SetValues(dropdown_items) end
+
+        if dropdown_p then 
+            dropdown_p:SetValues(dropdown_items)
+            
+            -- Auto-select saved owner if just loaded/connected
+            local owner_input = api:get_ui_object("protector_owner_input")
+            if owner_input and owner_input.Value and owner_input.Value ~= "" then
+                local saved_name = owner_input.Value
+                local p = Players:FindFirstChild(saved_name)
+                if p then
+                    local fmt = getFormattedName(p)
+                    local current = dropdown_p.Value or {}
+                    if not current[fmt] then
+                        current[fmt] = true
+                        dropdown_p:SetValue(current)
+                    end
+                end
+            end
+        end
+        
+    end, "updatePlayerList")
+end
+
+safe_call(function()
+    updatePlayerList()
+    api:add_connection(Players.PlayerAdded:Connect(updatePlayerList))
+    api:add_connection(Players.PlayerRemoving:Connect(updatePlayerList))
+end, "Player List Connections")
+
+local saved_state = {
+    targets = {}, enabled = false, flame = false, kill_nearby = false,
+    desync = false, void_prot = false, original_pos = nil, has_saved = false
+}
+
+function saveState()
+    safe_call(function()
+        if saved_state.has_saved then return end
+        local rb_targets = api:get_ui_object("ragebot_targets")
+        local rb_enabled = api:get_ui_object("ragebot_enabled")
+        local rb_flame = api:get_ui_object("ragebot_flame")
+        local rb_kill_nearby = api:get_ui_object("ragebot_kill_nearby")
+        local char_desync = api:get_ui_object("desync_enabled")
+        local char_void = api:get_ui_object("character_prot_void")
+        
+        saved_state.targets = rb_targets and rb_targets.Value or {}
+        saved_state.enabled = rb_enabled and rb_enabled.Value or false
+        saved_state.flame = rb_flame and rb_flame.Value or false
+        saved_state.kill_nearby = rb_kill_nearby and rb_kill_nearby.Value or false
+        saved_state.desync = char_desync and char_desync.Value or false
+        saved_state.void_prot = char_void and char_void.Value or false
+        saved_state.original_pos = LocalPlayer.Character and LocalPlayer.Character.PrimaryPart and LocalPlayer.Character.PrimaryPart.CFrame
+        saved_state.has_saved = true
+    end, "saveState")
+end
+
+function restoreState()
+    safe_call(function()
+        if not saved_state.has_saved then return end
+        
+        -- Disable ragebot immediately to stop attacking
+        api:set_ragebot(false)
+
+        local follow_obj = api:get_ui_object("protector_follow_owner")
+        local is_following = follow_obj and follow_obj.Value
+
+        if saved_state.original_pos and not is_following then
+            api:teleport(saved_state.original_pos)
+            task.wait(1.2)
+        end
+        local rb_targets = api:get_ui_object("ragebot_targets")
+        local rb_enabled = api:get_ui_object("ragebot_enabled")
+        local rb_flame = api:get_ui_object("ragebot_flame")
+        local rb_kill_nearby = api:get_ui_object("ragebot_kill_nearby")
+        local char_desync = api:get_ui_object("desync_enabled")
+        local char_void = api:get_ui_object("character_prot_void")
+        
+        if rb_targets then pcall(function() rb_targets:SetValue(saved_state.targets) end) end
+        if rb_enabled then pcall(function() rb_enabled:SetValue(saved_state.enabled) end) end
+        if rb_flame then pcall(function() rb_flame:SetValue(saved_state.flame) end) end
+        if rb_kill_nearby then pcall(function() rb_kill_nearby:SetValue(saved_state.kill_nearby) end) end
+        if char_desync then pcall(function() char_desync:SetValue(saved_state.desync) end) end
+        if char_void then pcall(function() char_void:SetValue(saved_state.void_prot) end) end
+        if char_void then pcall(function() char_void:SetValue(saved_state.void_prot) end) end
+        saved_state.has_saved = false
+    end, "restoreState")
+end
+
+local active_threats = {} -- Now stores {name = timestamp} for timeout
+local THREAT_TIMEOUT = 30 -- seconds before a threat is considered stale
+local VoidCFrame = CFrame.new(18812581888888, 99999999999999999999999999999, 998235235621111)
+
+local stomp_connection = nil
+local follow_connection = nil 
+
+local was_following = false
+
+follow_connection = RunService.Heartbeat:Connect(function()
+    safe_call(function()
+        local active_obj = api:get_ui_object("protector_active")
+        local follow_obj = api:get_ui_object("protector_follow_owner")
+        local targets_obj = api:get_ui_object("protector_targets")
+        
+        local should_follow = active_obj and active_obj.Value and follow_obj and follow_obj.Value
+        
+        -- Don't follow if we are fighting
+        if next(active_threats) ~= nil or stomp_connection then should_follow = false end
+
+        if not should_follow then
+            if was_following then
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                     pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil) end)
+                end
+                was_following = false
+            end
+            
+            -- NaN Void Idle Logic
+            local nan_idle = api:get_ui_object("protector_nan_idle")
+            if active_obj and active_obj.Value and nan_idle and nan_idle.Value and next(active_threats) == nil and not stomp_connection then
+                 pcall(function() api:set_server_cframe(VoidCFrame) end)
+            end
+            
+            return 
+        end
+        
+        local targets = targets_obj.Value or {}
+        local owner = nil
+        -- Find first valid owner
+        for name_str, _ in pairs(targets) do
+             local username = name_str:match("@([^%)]+)")
+             local p = Players:FindFirstChild(username)
+             if p and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                 owner = p
+                 break
+             end
+        end
+        
+        if not owner then
+            if was_following then
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                     pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil) end)
+                end
+                was_following = false
+            end
+            
+            -- NaN Void Idle Logic (Duplicate check for when owner is missing)
+            local nan_idle = api:get_ui_object("protector_nan_idle")
+            if active_obj and active_obj.Value and nan_idle and nan_idle.Value and next(active_threats) == nil and not stomp_connection then
+                 pcall(function() api:set_server_cframe(VoidCFrame) end)
+            end
+
+            return 
+        end
+
+        if not (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) then return end
+        
+        local off_x = api:get_ui_object("protector_follow_off_x").Value
+        local off_y = api:get_ui_object("protector_follow_off_y").Value
+        local off_z = api:get_ui_object("protector_follow_off_z").Value
+        
+        local targetCFrame = owner.Character.HumanoidRootPart.CFrame * CFrame.new(off_x, off_y, off_z)
+        
+        pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", owner.Character.HumanoidRootPart) end)
+        pcall(function() api:set_server_cframe(targetCFrame) end)
+        
+        was_following = true
+    end, "Follow Owner Heartbeat")
+end)
+
+
+local function refreshRagebot(stop_reason)
+    safe_call(function()
+        local rb_targets = api:get_ui_object("ragebot_targets")
+        local rb_enabled = api:get_ui_object("ragebot_enabled")
+        local rb_flame = api:get_ui_object("ragebot_flame")
+        local rb_kill_nearby = api:get_ui_object("ragebot_kill_nearby")
+        local use_flame = api:get_ui_object("protector_use_flame")
+        local threats = {}
+        local last_attacker = ""
+        for name, _ in pairs(active_threats) do
+            local p = Players:FindFirstChild(name)
+            if p and p.Parent and p.Character then table.insert(threats, name) last_attacker = name
+            else active_threats[name] = nil end
+        end
+        if #threats > 0 and not stomp_connection then
+            saveState()
+            if rb_targets then pcall(function() rb_targets:SetValue(threats) rb_targets:SetValue(last_attacker) end) end
+            if use_flame and use_flame.Value and rb_flame then pcall(function() rb_flame:SetValue(true) end) end
+            if rb_kill_nearby then pcall(function() rb_kill_nearby:SetValue(false) end) end
+            local char_desync = api:get_ui_object("desync_enabled")
+            local char_void = api:get_ui_object("character_prot_void")
+            if char_desync then pcall(function() char_desync:SetValue(false) end) end
+            if char_void then pcall(function() char_void:SetValue(false) end) end
+            api:set_ragebot(true)
+        elseif #threats == 0 then
+            restoreState()
+            if stop_reason then api:notify(string.format("[KITTEN SAVER] Stopped: %s", stop_reason), 5) end
+        end
+    end, "refreshRagebot")
+end
+
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+        safe_call(function()
+            local active_obj = api:get_ui_object("protector_active")
+            local stomp_obj = api:get_ui_object("protector_stomp")
+            if not (active_obj and active_obj.Value) then
+                if next(active_threats) ~= nil then active_threats = {} refreshRagebot("Protector Disabled") end
+                if stomp_connection then stomp_connection:Disconnect() stomp_connection = nil end
+                return
+            end
+            local changed, final_reason, needs_stomp = false, "", nil
+            local current_time = tick()
+            local timeout_slider = api:get_ui_object("protector_threat_timeout")
+            local timeout_val = (timeout_slider and timeout_slider.Value) or THREAT_TIMEOUT
+            for attacker_name, added_time in pairs(active_threats) do
+                local p = Players:FindFirstChild(attacker_name)
+                local neutralized, reason = false, ""
+                
+                -- Check timeout first (clear stale threats)
+                if type(added_time) == "number" and (current_time - added_time) > timeout_val then
+                    neutralized, reason = true, "Timeout"
+                end
+                
+                -- Check whitelist
+                if not neutralized then
+                    local whitelist_obj = api:get_ui_object("protector_whitelist")
+                    if whitelist_obj and whitelist_obj.Value then
+                        for fmt_name, enabled in pairs(whitelist_obj.Value) do
+                            if enabled then
+                                local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                                if extracted == attacker_name then
+                                    neutralized, reason = true, "Whitelisted"
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                -- Check Owner Input
+                if not neutralized then
+                    local owner_input = api:get_ui_object("protector_owner_input")
+                    if owner_input and owner_input.Value == attacker_name then
+                         neutralized, reason = true, "Owner"
+                    end
+                end
+
+                if not neutralized then
+                    if not p or not p.Parent then 
+                        neutralized, reason = true, "Target Left"
+                    else
+                        local status = api:get_status_cache(p)
+                        local is_dead = (p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health <= 0)
+                        
+                        if status and status.SDeath then neutralized, reason = true, "Target Stomped"
+                        elseif (status and (status["K.O"] or status.Dead)) or is_dead then
+                            if stomp_obj and stomp_obj.Value then needs_stomp = p
+                            else neutralized, reason = true, "Target K.O/Dead" end
+                        elseif not (p.Character and p.Character:FindFirstChild("Humanoid")) then neutralized, reason = true, "Target Invalid" end
+                    end
+                end
+                if neutralized then 
+                    active_threats[attacker_name] = nil 
+                    changed = true 
+                    final_reason = reason 
+                    
+                    -- Check Force Reload
+                    local reload_toggle = api:get_ui_object("protector_reload_on_ko")
+                    if reload_toggle and reload_toggle.Value and (reason:find("Stomped") or reason:find("K.O") or reason:find("Dead")) then
+                         forceReload()
+                    end
+                end
+            end
+            if needs_stomp and not stomp_connection then
+                saveState()
+                api:set_ragebot(false)
+                local rb_enabled = api:get_ui_object("ragebot_enabled")
+                if rb_enabled then rb_enabled:SetValue(false) end
+                stomp_connection = RunService.Heartbeat:Connect(function()
+                    safe_call(function()
+                        -- Check if target is still valid
+                        if not (needs_stomp and needs_stomp.Character) then
+                            if stomp_connection then 
+                                stomp_connection:Disconnect() 
+                                stomp_connection = nil 
+                                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                     pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil) end)
+                                end
+                            end
+                            return
+                        end
+                        
+                        -- Check if target is now dead (SDeath = stomped to death)
+                        local status = api:get_status_cache(needs_stomp)
+                        if status and status.SDeath then
+                            if stomp_connection then 
+                                stomp_connection:Disconnect() 
+                                stomp_connection = nil 
+                                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                                     pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil) end)
+                                end
+                                -- Remove from threats
+                                active_threats[needs_stomp.Name] = nil
+                                refreshRagebot("Target Stomped")
+                            end
+                            return
+                        end
+                        
+                        local target_char = needs_stomp.Character
+                        local my_root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        local target_root = target_char:FindFirstChild("HumanoidRootPart") or target_char:FindFirstChild("UpperTorso")
+                        
+                        if not (target_root and my_root) then return end
+
+                        local stomp_height = api:get_ui_object("protector_stomp_height").Value or 3
+                        local stomp_pos = target_root.Position + Vector3.new(0, stomp_height, 0)
+                        local look_cf = CFrame.new(stomp_pos, target_root.Position)
+                        
+                        pcall(function()
+                            -- 1. Physics Sticky (like auto_stomp_v2)
+                            if sethiddenproperty then
+                                sethiddenproperty(my_root, "PhysicsRepRootPart", target_root)
+                            end
+                            
+                            -- 2. Desync teleport (like auto_stomp_v2)
+                            if api.can_desync and api:can_desync() then
+                                api:set_desync_cframe(look_cf)
+                            elseif api.set_server_cframe then
+                                api:set_server_cframe(look_cf)
+                            end
+                            
+                            -- 3. Stomp Action
+                            if MainEvent then
+                                MainEvent:FireServer("Stomp")
+                            end
+                        end)
+                    end, "Stomp Heartbeat")
+                end)
+            elseif not needs_stomp and stomp_connection then
+                stomp_connection:Disconnect() stomp_connection = nil
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                     pcall(function() sethiddenproperty(LocalPlayer.Character.HumanoidRootPart, "PhysicsRepRootPart", nil) end)
+                end
+                restoreState() refreshRagebot()
+            end
+            if changed then refreshRagebot(final_reason) end
+
+            -- Spiral Management
+            local spiral_obj = api:get_ui_object("ragebot_spiral")
+            if spiral_obj and #active_threats > 0 then
+                local any_knocked = false
+                for attacker_name, _ in pairs(active_threats) do
+                    local p = Players:FindFirstChild(attacker_name)
+                    if p then
+                        local status = api:get_status_cache(p)
+                        if status and status["K.O"] then any_knocked = true break end
+                    end
+                end
+                if any_knocked and spiral_obj.Value then spiral_obj:SetValue(false)
+                elseif not any_knocked and not spiral_obj.Value then spiral_obj:SetValue(true) end
+            end
+        end, "Monitoring Loop Iteration")
+    end
+end)
+
+api:on_event("player_got_shot", function(shot_player_name, attacker_name, part, tool, origin, position)
+    safe_call(function()
+        local active_obj = api:get_ui_object("protector_active")
+        local targets_obj = api:get_ui_object("protector_targets")
+        if not (active_obj and active_obj.Value and targets_obj) then return end
+        if attacker_name == LocalPlayer.Name then return end
+        local victim = Players:FindFirstChild(shot_player_name)
+        if not victim then return end
+        if (targets_obj.Value or {})[getFormattedName(victim)] then
+            local whitelist_obj = api:get_ui_object("protector_whitelist")
+            local is_whitelisted = false
+            
+            if whitelist_obj and whitelist_obj.Value then
+                for fmt_name, enabled in pairs(whitelist_obj.Value) do
+                    if enabled then
+                        local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                        if extracted == attacker_name then
+                            is_whitelisted = true
+                            break
+                        end
+                    end
+                end
+            end
+            
+            local owner_input = api:get_ui_object("protector_owner_input")
+            if owner_input and owner_input.Value == attacker_name then is_whitelisted = true end
+            
+            if is_whitelisted then return end
+
+            local attacker_p = Players:FindFirstChild(attacker_name)
+            if attacker_p and attacker_p.Character then
+                if not active_threats[attacker_name] then
+                    active_threats[attacker_name] = tick() -- Store timestamp for timeout
+                    api:notify(string.format("[KITTEN SAVER] %s shot by %s!", victim.DisplayName, attacker_name), 5)
+                    refreshRagebot()
+                end
+            end
+        end
+    end, "player_got_shot Event")
+end)
+
+local health_connections = {}
+local health_cache = {} -- Track previous health for damage calculation
+local MELEE_RANGE = 10 -- studs for proximity-based attacker detection (reduced for accuracy)
+
+-- Helper: Check if tool is a melee weapon or fists
+local function isMeleeOrFists(tool)
+    if not tool then return true end -- No tool = fists
+    local name = tool.Name:lower()
+    return name:find("knife") or name:find("bat") or name:find("sledge") or 
+           name:find("pitchfork") or name:find("shovel") or name:find("stop") or 
+           name:find("whip") or name:find("pencil") or name:find("crowbar")
+end
+
+-- Helper: Find nearby attacker (for melee/fists when no creator tag)
+local function findNearbyAttacker(victim_char, victim_player)
+    local victim_pos = victim_char:FindFirstChild("HumanoidRootPart")
+    if not victim_pos then return nil end
+    victim_pos = victim_pos.Position
+    
+    local closest_dist = MELEE_RANGE
+    local closest_attacker = nil
+    
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= victim_player and p ~= LocalPlayer and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local dist = (hrp.Position - victim_pos).Magnitude
+                local tool = p.Character:FindFirstChildWhichIsA("Tool")
+                -- Only consider as attacker if they have melee/fists (guns use creator tag)
+                if dist < closest_dist and isMeleeOrFists(tool) then
+                    closest_dist = dist
+                    closest_attacker = p
+                end
+            end
+        end
+    end
+    
+    return closest_attacker
+end
+
+-- Helper: Check if attacker is whitelisted
+local function isAttackerWhitelisted(attacker_name)
+    -- Check Whitelist Dropdown
+    local whitelist_obj = api:get_ui_object("protector_whitelist")
+    if whitelist_obj and whitelist_obj.Value then
+        for fmt_name, enabled in pairs(whitelist_obj.Value) do
+            if enabled then
+                local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                if extracted == attacker_name then return true end
+            end
+        end
+    end
+    
+    -- Check Owner Input
+    local owner_input = api:get_ui_object("protector_owner_input")
+    if owner_input and owner_input.Value == attacker_name then return true end
+    
+    -- Check Protected Players (Implicit Whitelist)
+    local targets_obj = api:get_ui_object("protector_targets")
+    if targets_obj and targets_obj.Value then
+        for fmt_name, enabled in pairs(targets_obj.Value) do
+             if enabled then
+                local extracted = fmt_name:match("@([^%)]+)") or fmt_name
+                if extracted == attacker_name then return true end
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Helper: Get weapon type from tool
+local function getWeaponType(tool)
+    if not tool then return "Fists" end
+    local name = tool.Name:lower()
+    if name:find("glock") or name:find("revolver") or name:find("smg") or name:find("shotgun") or
+       name:find("ak") or name:find("ar") or name:find("rifle") or name:find("lmg") or name:find("p90") then
+        return "Gun"
+    elseif name:find("knife") or name:find("bat") or name:find("sledge") or name:find("pitchfork") or 
+           name:find("shovel") or name:find("stop") or name:find("whip") then
+        return "Melee"
+    end
+    return tool.Name
+end
+
+-- Handle detected damage to protected player
+local function handleDamageToProtected(victim_player, attacker_name, damage, weapon_type)
+    if not attacker_name or attacker_name == "" then return end
+    if attacker_name == LocalPlayer.Name then return end
+    if isAttackerWhitelisted(attacker_name) then return end
+    
+    local attacker_p = Players:FindFirstChild(attacker_name)
+    if attacker_p and attacker_p.Character then
+        if not active_threats[attacker_name] then
+            active_threats[attacker_name] = tick() -- Store timestamp for timeout
+            local weapon_str = weapon_type and " [" .. weapon_type .. "]" or ""
+            api:notify(string.format("[KITTEN SAVER] %s hit by %s!%s", victim_player.DisplayName, attacker_name, weapon_str), 5)
+            refreshRagebot()
+        end
+    end
+    if SyncWhitelist then SyncWhitelist() end
+end
+
+task.spawn(function()
+    while true do
+        task.wait(1)
+        safe_call(function()
+            local active_obj = api:get_ui_object("protector_active")
+            local targets_obj = api:get_ui_object("protector_targets")
+            
+            if not (active_obj and active_obj.Value and targets_obj) then return end
+            
+            local targets = targets_obj.Value or {}
+            local current_targets = {}
+
+            for name_str, _ in pairs(targets) do
+                local username = name_str:match("@([^%)]+)")
+                local p = Players:FindFirstChild(username)
+                if p then
+                    current_targets[p] = true
+                    if not health_connections[p] then
+                        if p.Character and p.Character:FindFirstChild("Humanoid") then
+                            local hum = p.Character.Humanoid
+                            health_cache[p] = hum.Health
+                            
+                            health_connections[p] = hum.HealthChanged:Connect(function(new_health)
+                                safe_call(function()
+                                    if not p.Character or not p.Character:FindFirstChild("Humanoid") then return end
+                                    
+                                    local old_health = health_cache[p] or hum.MaxHealth
+                                    local damage = old_health - new_health
+                                    health_cache[p] = new_health
+                                    
+                                    -- Only react to damage (not healing)
+                                    if damage <= 0.1 then return end
+                                    
+                                    local attacker_name = nil
+                                    local weapon_type = nil
+                                    
+                                    -- Method 1: Check creator tag (set by guns usually)
+                                    local creator = hum:FindFirstChild("creator") or hum:FindFirstChild("Creator")
+                                    if creator and creator.Value and creator.Value:IsA("Player") and creator.Value ~= LocalPlayer then
+                                        attacker_name = creator.Value.Name
+                                        if creator.Value.Character then
+                                            local tool = creator.Value.Character:FindFirstChildWhichIsA("Tool")
+                                            weapon_type = getWeaponType(tool)
+                                        end
+                                    end
+                                    
+                                    -- Method 2: Proximity check (for melee/fists when no creator)
+                                    if not attacker_name then
+                                        local nearby = findNearbyAttacker(p.Character, p)
+                                        if nearby then
+                                            attacker_name = nearby.Name
+                                            local tool = nearby.Character and nearby.Character:FindFirstChildWhichIsA("Tool")
+                                            weapon_type = getWeaponType(tool)
+                                        end
+                                    end
+                                    
+                                    if attacker_name then
+                                        handleDamageToProtected(p, attacker_name, damage, weapon_type)
+                                    end
+                                end, "Enhanced Damage Monitor")
+                            end)
+                        end
+                    end
+                end
+            end
+            
+            -- AIM PROTECTION LOOP
+            local aim_toggle = api:get_ui_object("protector_aim_check")
+            if aim_toggle and aim_toggle.Value then 
+                safe_call(function()
+                    local dist_slider = api:get_ui_object("protector_aim_dist")
+                    local RAY_DIST = dist_slider and dist_slider.Value or 100
+                    
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer and player.Character then
+                            -- Skip if already a threat or whitelisted
+                            if not active_threats[player.Name] and not isAttackerWhitelisted(player.Name) then
+                                local has_weapon = player.Character:FindFirstChildWhichIsA("Tool")
+                                if has_weapon then
+                                    local head = player.Character:FindFirstChild("Head")
+                                    if head then
+                                        local origin = head.Position
+                                        -- Default LookVector
+                                        local direction = head.CFrame.LookVector * RAY_DIST
+                                        
+                                        -- Try MousePos
+                                        local be = player.Character:FindFirstChild("BodyEffects")
+                                        if be then
+                                           local v3 = be:FindFirstChild("MousePos")
+                                           if v3 and v3:IsA("Vector3Value") then
+                                               direction = (v3.Value - origin).Unit * RAY_DIST
+                                           end
+                                        end
+                                        
+                                        -- Cast Ray
+                                        local params = RaycastParams.new()
+                                        params.FilterDescendantsInstances = {player.Character}
+                                        params.FilterType = Enum.RaycastFilterType.Exclude
+                                        params.IgnoreWater = true
+                                        
+                                        local result = workspace:Raycast(origin, direction, params)
+                                        if result and result.Instance then
+                                            local model = result.Instance:FindFirstAncestorOfClass("Model")
+                                            local victim_plr = model and Players:GetPlayerFromCharacter(model)
+                                            
+                                            -- Is Victim Protected?
+                                            if victim_plr then
+                                                local is_protected = false
+                                                -- Check Owner Input
+                                                local owner_input = api:get_ui_object("protector_owner_input")
+                                                if owner_input and owner_input.Value == victim_plr.Name then is_protected = true end
+                                                
+                                                -- Check Target Dropdown/List
+                                                if not is_protected then
+                                                    local dropdown_items = targets_obj.Value or {}
+                                                    if dropdown_items[getFormattedName(victim_plr)] then is_protected = true end
+                                                end
+                                                
+                                                if is_protected then
+                                                    -- THREAT DETECTED
+                                                    active_threats[player.Name] = tick()
+                                                    api:notify(string.format("[KITTEN SAVER] Aim Detected! %s aiming at %s", player.Name, victim_plr.Name), 4)
+                                                    refreshRagebot("Aim Detected")
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end, "Aim Protection Loop")
+            end
+
+            -- Cleanup old connections
+            for p, conn in pairs(health_connections) do
+                if not current_targets[p] or not (p.Character and p.Character:FindFirstChild("Humanoid")) then
+                    conn:Disconnect()
+                    health_connections[p] = nil
+                    health_cache[p] = nil
+                end
+            end
+            
+        end, "Health Monitor Loop")
+    end
+end)
+
+pcall(function()
+    local flame_toggle = api:get_ui_object("protector_use_flame")
+    if flame_toggle and flame_toggle.SetText then flame_toggle:SetText("<font color=\"#FF0000\">Use Flame while Killing</font>") end
+end)
+
+    api:notify("Hayden's Kitten Saver 900 Loaded", 3)
